@@ -1,6 +1,6 @@
 # Vigente — Arquitectura
 
-Estado: **aprobada** (18-11-2026). Los cinco hitos están implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
+Estado: **aprobada** (18-11-2026). Los cinco hitos del plan original están implementados, y el hito 6 añade seguridad (§11). Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
 
 ## 1. Resumen
 
@@ -199,6 +199,7 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 - **Errores:** `ToolError` con el formato `código: mensaje`, más `(current_id: …)` cuando aplica. Los errores de validación dicen qué campo falló **sin repetir el valor enviado**, que puede ser el contenido de una memoria.
 - **Una conexión por llamada:** el SDK ejecuta las herramientas síncronas en un pool de hilos, y una conexión SQLite no debe compartirse entre hilos. Abrir y cerrar el servicio (conexión, carga de sqlite-vec, pragmas y comprobación de migraciones) cuesta 1,8 ms de mediana y 2,0 ms en p95 (300 mediciones sobre una base con 200 memorias, Apple Silicon). Abrirlo para leer no toma el bloqueo de escritura: el workspace solo se crea si no existe. El cliente HTTP de embeddings sí se comparte.
 - **stdout es el canal del protocolo:** nada escribe en stdout, y los logs del SDK van a stderr en nivel WARNING. A nivel INFO registraría los errores de validación con los valores de entrada, es decir, con contenido de memorias.
+- *(Hito 6)* **Seguridad:** `remember` y `supersede` rechazan secretos (`secret_detected`) y caracteres invisibles que esconden texto (`hidden_characters`). Cada memoria devuelta lleva `flags` si parece una orden, tiene caracteres de ancho cero o contiene un secreto antiguo, y `recall` lo avisa en `warnings` (§11).
 - **Arranque:** `vigente-mcp` valida la configuración (base de datos, workspace, URL de embeddings) antes de aceptar conexiones y, si algo falla, termina con un mensaje claro en stderr.
 
 **Prueba con un agente real** *(Hito 3, [informe](../eval/results/agent_demo.md), `eval/agent_demo.py`)*. Cuatro sesiones independientes de Claude Code, que solo tienen las herramientas de Vigente. Ejecutada dos veces, con el mismo comportamiento las dos:
@@ -261,6 +262,7 @@ Lo que sigue de esta sección es el plan original.
 | Mezcla de español e inglés | `unicode61` sin stemming; modelo de embeddings multilingüe |
 | El agente puede no llamar a `supersede` | Descripciones claras de las herramientas; se mide en E2b; se documenta como limitación |
 | KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crece de forma lineal. `recall` tarda 1,5 ms con 1.000 memorias, 13 ms con 10.000 y 62 ms con 50.000, sin contar el modelo; la base ocupa 191 MB con 50.000. Para cientos de miles habría que pasar a vectores cuantizados o a un índice aproximado ([escala](../eval/results/scale.md)) |
+| Memoria envenenada o secretos guardados *(Hito 6)* | Se rechazan los secretos y los caracteres invisibles al guardar; las órdenes se marcan al leer, `recall` avisa y `vigente review` las lista. Las reglas no paran a un atacante que las conozca (ADR-0007) |
 | Varios clientes (CLI, Claude Code, Codex, Cursor) sobre el mismo archivo | WAL + `busy_timeout`. *(v1.0.1)* Al crear la base a la vez fallaba el 57% de las aperturas; el paso a WAL se reintenta y un test lo comprueba con cuatro procesos. Probado también con tres servidores MCP escribiendo a la vez |
 | Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `vigente reindex` completa lo pendiente |
 | Enviar memorias a un servicio remoto sin querer *(Hito 2)* | Toda URL no local se rechaza salvo con `VIGENTE_ALLOW_REMOTE=1`; la clave de API solo llega por entorno |
@@ -268,3 +270,14 @@ Lo que sigue de esta sección es el plan original.
 | Rendimiento que solo se ve con muchos datos *(Hito 4)* | El benchmark de escala encontró una búsqueda de texto con coste cuadrático (§6); un test comprueba el plan de la consulta |
 | Resultados de evaluación no reproducibles *(Hito 4)* | El desempate de RRF dependía de ids aleatorios; corregido, y las evaluaciones se ejecutaron dos veces con resultados idénticos |
 | Vecinos sin relación en los resultados *(Hito 2)* | Ningún umbral los separa en los datos actuales; se documenta y lo decide el agente |
+
+## 11. Seguridad de la memoria *(Hito 6)*
+
+Qué se decidió y qué alternativas se descartaron está en el [ADR-0007](decisions/0007-seguridad-de-la-memoria.md). Aquí, cómo encaja:
+
+- **[`safety.py`](../src/vigente/safety.py)** reúne las reglas: expresiones regulares y una medida de entropía, sin dependencias ni LLM.
+- **Al guardar,** `service.remember` y `service.supersede` comprueban el contenido, la fuente, el motivo y las etiquetas antes de calcular el embedding. Los secretos y los caracteres *tag* o bidireccionales se rechazan. Solo la CLI pasa `allow_secrets`; el servidor MCP no tiene forma de hacerlo.
+- **Al leer,** `Memory.flags` es un campo calculado, no una columna: cubre las memorias anteriores sin migrar la base, y las reglas pueden mejorar sin reescribir datos.
+- **Coste medido:** unos 13 µs por memoria al guardar y unos 25 µs por memoria leída. `vigente review` recorre el workspace entero, así que con 50.000 memorias rondaría el segundo (estimación, no medida).
+- **Evaluación:** E3 ([informe](../eval/results/e3_security.md)), con casos y reglas fijados antes de escribir los detectores, y una comprobación con los mensajes reales de LongMemEval que llevó a corregir la regla de tokens.
+- E2 guarda los mensajes de LongMemEval con `allow_secrets`: mide la búsqueda, no los filtros, y así sus resultados no cambian.

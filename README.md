@@ -32,6 +32,7 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 questions from a public benchmark: without supersession, the old version of an updated fact ranks above the new one in **54–56%** of cases, with any search mode.
 - **[Scale](eval/results/scale.md):** with 50,000 memories, a search takes 62 ms and a full deletion 52 ms, plus about 15 ms for the embedding model.
 - **[A real agent](eval/results/agent_demo.md)** (Claude Code, four independent sessions sharing only Vigente) follows the protocol on its own: it searches before saving, links changes without duplicating facts, and answers with what is current.
+- **[Security](eval/results/e3_security.md):** the filters catch 40 of 40 secrets with no false alarms on 40 lookalikes (order numbers, hashes, «the key is in 1Password»), and flag 40 of 40 injected orders while marking 1 of 40 legitimate memories. The same author wrote the cases and the rules, so read it as a ceiling.
 
 The decision rules were fixed **before** measuring ([protocol](eval/README.md)), and E1 and E2 give identical results when re-run.
 
@@ -42,6 +43,7 @@ The decision rules were fixed **before** measuring ([protocol](eval/README.md)),
 - **The engine calls no LLM.** `remember` uses local embeddings (embeddinggemma via Ollama) to propose facts the new one may replace. The agent, which already is an LLM, decides.
 - **Forgetting is real.** `forget` deletes every version of a fact from the rows, both indexes and the disk. A test checks that the bytes are gone from the file.
 - **It degrades gracefully.** Without embeddings it searches by text. It refuses to send memories to a non-local service unless you allow it.
+- **It is safe to share between agents.** Secrets are rejected on save, and so is hidden Unicode that can smuggle instructions. Text that reads like an order to the agent is stored but flagged: `recall` warns the agent, and `vigente review` lists it ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
 
 ## Quick start
 
@@ -86,7 +88,7 @@ codex mcp add vigente --env VIGENTE_WORKSPACE=my-project -- uv --directory /path
 
 | Tool | What it does |
 |---|---|
-| `remember` | Saves a fact or an episode and proposes current facts it may replace |
+| `remember` | Saves a fact or an episode and proposes current facts it may replace. Rejects secrets |
 | `recall` | Searches what is true now, or at a past date (`as_of`) |
 | `supersede` | Closes an outdated fact and links its new version (new text, or the id `remember` just returned) |
 | `history` | All versions of a fact |
@@ -121,6 +123,7 @@ Each decision has an ADR with the alternatives considered (in Spanish):
 4. [embeddinggemma by default, chosen with a benchmark; threshold 0.51](docs/decisions/0004-modelo-de-embeddings.md)
 5. [`supersede` can link a memory that is already stored](docs/decisions/0005-dos-formas-de-reemplazar.md)
 6. [Vector-only search by default, decided with the evaluation](docs/decisions/0006-busqueda-por-vectores.md)
+7. [What never enters the memory, and what enters flagged](docs/decisions/0007-seguridad-de-la-memoria.md)
 
 The full design is in [docs/architecture.md](docs/architecture.md).
 
@@ -130,6 +133,7 @@ The full design is in [docs/architecture.md](docs/architecture.md).
 - **Chains are linear:** a new version replaces one fact. «Ana and Luis moved to Lisbon» cannot close two facts at once.
 - **Search is exact (brute-force KNN).** Its cost grows linearly. Hundreds of thousands of memories would need quantized vectors or an approximate index.
 - **The evaluation has blind spots.** Few queries rely on exact matches (error codes, IDs), which is where text search usually helps, and the synthetic set is built from templates.
+- **The security filters are rules.** They catch the obvious, not an attacker who knows them, and the order detector only covers Spanish and English.
 - **The memory is local.** Clients on the same computer share it; cloud agents and teammates cannot reach it.
 - **The CLI, the ADRs and the evaluation reports are in Spanish.**
 

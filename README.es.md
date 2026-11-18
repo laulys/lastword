@@ -32,6 +32,7 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 preguntas de un benchmark público: sin reemplazos, la versión vieja de un dato actualizado sale antes que la nueva en el **54–56%** de los casos, con cualquier modo de búsqueda.
 - **[Escala](eval/results/scale.md):** con 50.000 memorias, una búsqueda tarda 62 ms y un borrado completo 52 ms, más unos 15 ms del modelo de embeddings.
 - **[Un agente real](eval/results/agent_demo.md)** (Claude Code, cuatro sesiones independientes que solo comparten Vigente) sigue el protocolo por su cuenta: busca antes de guardar, enlaza los cambios sin duplicar hechos y responde con lo vigente.
+- **[Seguridad](eval/results/e3_security.md):** los filtros detectan 40 de 40 secretos sin ningún falso aviso en 40 frases parecidas (números de pedido, hashes, «la clave está en 1Password»), y marcan 40 de 40 órdenes incrustadas frente a 1 de 40 memorias legítimas. Los casos y las reglas los escribió la misma persona: es un techo.
 
 Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.md)), y E1 y E2 dan resultados idénticos al repetirlos.
 
@@ -42,6 +43,7 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 - **El motor no llama a ningún LLM.** `remember` usa embeddings locales (embeddinggemma con Ollama) para proponer hechos que lo nuevo podría reemplazar. Decide el agente, que ya es un LLM.
 - **Olvidar es borrar de verdad.** `forget` borra todas las versiones de un hecho de las filas, de los dos índices y del disco. Un test comprueba que los bytes desaparecen del archivo.
 - **Si algo falla, sigue funcionando.** Sin embeddings, busca por texto. Se niega a enviar memorias a un servicio que no sea local salvo que lo permitas.
+- **Se puede compartir entre agentes con seguridad.** Rechaza al guardar los secretos y los caracteres Unicode invisibles que pueden esconder instrucciones. El texto que suena a orden para el agente se guarda marcado: `recall` avisa al agente y `vigente review` lo lista ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
 
 ## Probarlo
 
@@ -86,7 +88,7 @@ codex mcp add vigente --env VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /rut
 
 | Herramienta | Qué hace |
 |---|---|
-| `remember` | Guarda un hecho o un episodio y propone hechos vigentes que podría reemplazar |
+| `remember` | Guarda un hecho o un episodio y propone hechos vigentes que podría reemplazar. Rechaza secretos |
 | `recall` | Busca lo que es verdad ahora, o en una fecha pasada (`as_of`) |
 | `supersede` | Cierra un hecho obsoleto y enlaza su versión nueva (texto nuevo, o el id que acaba de devolver `remember`) |
 | `history` | Todas las versiones de un hecho |
@@ -121,6 +123,7 @@ Cada decisión tiene un ADR con las alternativas que se consideraron:
 4. [embeddinggemma por defecto, elegido con un benchmark; umbral 0.51](docs/decisions/0004-modelo-de-embeddings.md)
 5. [`supersede` puede enlazar una memoria ya guardada](docs/decisions/0005-dos-formas-de-reemplazar.md)
 6. [Búsqueda por vectores por defecto, decidida con la evaluación](docs/decisions/0006-busqueda-por-vectores.md)
+7. [Lo que no entra en la memoria y lo que entra marcado](docs/decisions/0007-seguridad-de-la-memoria.md)
 
 El diseño completo está en [docs/architecture.md](docs/architecture.md).
 
@@ -129,6 +132,7 @@ El diseño completo está en [docs/architecture.md](docs/architecture.md).
 - **Las propuestas de reemplazo tienen ruido.** La similitud no distingue «esto actualiza aquello» de «esto añade información sobre lo mismo», así que las frases del mismo tema también reciben propuestas. Por eso decide el agente.
 - **Las cadenas son lineales:** una versión nueva reemplaza a un solo hecho. «Ana y Luis se mudaron a Lisboa» no puede cerrar dos hechos a la vez.
 - **La búsqueda es exacta (KNN por fuerza bruta).** Su coste crece de forma lineal. Con cientos de miles de memorias harían falta vectores cuantizados o un índice aproximado.
+- **Los filtros de seguridad son reglas.** Cazan lo evidente, no a un atacante que las conozca, y el detector de órdenes solo cubre español e inglés.
 - **La memoria es local.** La comparten los clientes del mismo ordenador; los agentes en la nube y tus compañeros no llegan a ella.
 - **La evaluación tiene puntos ciegos.** Hay pocas consultas de coincidencia exacta (códigos de error, identificadores), que es donde la búsqueda por texto suele aportar, y el conjunto sintético sale de plantillas.
 
