@@ -1,6 +1,6 @@
-# Vigente — Arquitectura (Hito 0)
+# Vigente — Arquitectura
 
-Estado: **aprobada** (18-11-2026). Hito 1 implementado. Lo marcado con *(Hito 1)* recoge lo que se aprendió al implementarlo.
+Estado: **aprobada** (18-11-2026). Hitos 1 y 2 implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
 
 ## 1. Resumen
 
@@ -51,6 +51,8 @@ Los puntos 4 y 5 determinan reglas del diseño (ver §4 y ADR-0001).
 - Solo `store.py` escribe SQL.
 - Solo `service.py` abre transacciones. Una operación del usuario es una transacción.
 - `Embedder` es la única interfaz abstracta. Tiene dos implementaciones reales: la compatible con OpenAI y `FakeEmbedder` para tests.
+- *(Hito 2)* Cada familia de modelos tiene un `ModelProfile`: el formato de entrada que espera según el uso (documento guardado, pregunta, comparación) y sus umbrales calibrados. Si no se respeta el formato, la calidad cae sin dar ningún error.
+- *(Hito 2)* Los embeddings se calculan **fuera** de las transacciones: son llamadas de red y no deben bloquear la base de datos.
 
 ## 4. Esquema SQL
 
@@ -101,31 +103,33 @@ CREATE VIRTUAL TABLE memories_fts USING fts5(
   tokenize = 'unicode61 remove_diacritics 2'   -- "migración" = "migracion"; sin stemming (ES + EN)
 );
 
--- Registro de espacios vectoriales: un índice por (modelo, dimensión).
+-- Migración v2 (Hito 2). Registro de espacios vectoriales: un índice por (modelo, dimensión).
+-- El espacio activo es el del modelo configurado; no hace falta una columna "is_active".
 CREATE TABLE embedding_spaces (
   id          INTEGER PRIMARY KEY,
   model       TEXT NOT NULL,
-  dim         INTEGER NOT NULL,
+  dim         INTEGER NOT NULL CHECK (dim BETWEEN 1 AND 8192),
   table_name  TEXT NOT NULL UNIQUE,      -- "vec_1", "vec_2", ...
-  is_active   INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   UNIQUE (model, dim)
 );
 
--- Creada en tiempo de ejecución para cada embedding_space (ejemplo con dim = 1024):
+-- Creada al guardar el primer vector de cada espacio (ejemplo: embeddinggemma, 768 dim).
+-- rowid = memories.seq, igual que en FTS.
 CREATE VIRTUAL TABLE vec_1 USING vec0(
-  memory_id     TEXT PRIMARY KEY,
   workspace_id  TEXT PARTITION KEY,
-  status        TEXT,
+  kind          TEXT,
   valid_from    INTEGER,
   valid_to      INTEGER,
-  embedding     FLOAT[1024] distance_metric=cosine
+  embedding     FLOAT[768] distance_metric=cosine
 );
 ```
 
 **Por qué `seq` además del ULID** *(Hito 1)*: el índice FTS se enlaza por número de fila. En tablas sin `INTEGER PRIMARY KEY`, `VACUUM` puede renumerar el rowid implícito, y eso desincronizaría el índice en silencio. `seq` es un alias explícito y estable; `id` sigue siendo el identificador público.
 
-**Por qué hay columnas duplicadas en `vec_N`:** `status`, `valid_from` y `valid_to` se repiten ahí para que el filtro ocurra dentro del KNN (§2.1). Se mantienen sincronizadas en la misma transacción que `memories`, y `vigente doctor` comprueba que coincidan.
+**Por qué hay columnas duplicadas en `vec_N`:** `kind`, `valid_from` y `valid_to` se repiten ahí para que el filtro ocurra dentro del KNN (§2.1). *(Hito 2)* No hace falta `status`, porque la vigencia se decide por fechas (§5). Se mantienen sincronizadas en la misma transacción que `memories`, y `vigente doctor` comprueba que coincidan y que no haya vectores huérfanos.
+
+*(Hito 2)* **Borrar un vector también lo borra del disco:** sqlite-vec sobrescribe el vector dentro de su bloque al borrarlo y, con `secure_delete`, no quedan restos. Un test busca los bytes del vector en el archivo antes y después de `forget`. Importa porque un embedding puede revelar información del texto original.
 
 **Invariante comprobada por tests y por `vigente doctor`:** el conjunto de ids de `memories`, `memories_fts` y el `vec_N` activo es el mismo (salvo memorias sin embedding, que no están en `vec_N`).
 
@@ -151,13 +155,18 @@ CREATE VIRTUAL TABLE vec_1 USING vec0(
 ## 6. Recuperación
 
 1. **Saneamiento de la consulta FTS.** El texto del usuario no va directo a `MATCH`, porque comillas, `*`, `NEAR` o `-` romperían la sintaxis o cambiarían su significado. Se tokeniza y cada token se cita: `"token1" OR "token2"`. Se quitan palabras vacías (lista mínima en español e inglés) salvo que no quede ninguna otra. El ranking lo da BM25.
-2. **FTS:** `memories_fts` unida a `memories` con los filtros de workspace, vigencia o `as_of`, y `kind`. Se piden `k × 4` candidatos.
-3. **Vector:** se calcula el embedding de la consulta y se hace KNN en el `vec_N` activo con los mismos filtros dentro del KNN. También `k × 4` candidatos.
-4. **Fusión RRF:** `score(d) = Σ 1 / (60 + rank_i(d))`. Se ordena y se corta en `k`.
-5. **Modos:** sin `Embedder` configurado, el modo es `fts_only` y se informa en la respuesta. Nada falla.
+2. **FTS:** `memories_fts` unida a `memories` con los filtros de workspace, vigencia o `as_of`, y `kind`. Se piden `max(k × 4, 20)` candidatos, con un máximo de 200.
+3. **Vector:** se calcula el embedding de la consulta con el formato de pregunta del modelo y se hace KNN en el `vec_N` activo con los mismos filtros dentro del KNN. Mismo número de candidatos.
+4. **Fusión RRF:** `score(d) = Σ 1 / (60 + rank_i(d))`. Solo usa posiciones, así que no hace falta normalizar BM25 y coseno, que están en escalas incomparables. Se ordena y se corta en `k`.
+5. **Modos:** sin `Embedder` configurado, el modo es `fts_only`. *(Hito 2)* Si el servicio de embeddings falla, también: la respuesta lleva un aviso en `warnings` y nada falla. Al guardar, la memoria se guarda sin vector y `vigente reindex` lo completa después.
 6. **`include_history=true`** quita el filtro de vigencia y marca cada resultado con su `status`.
 
-Cada resultado devuelve `id`, `content`, `kind`, `valid_from`, `valid_to`, `status`, `score` y `matched_by` (`["fts"]`, `["vector"]` o ambos).
+Cada resultado devuelve la memoria completa, `score`, `matched_by` (`["fts"]`, `["vector"]` o ambos) y `similarity` (coseno) si la encontró la búsqueda vectorial.
+
+*(Hito 2)* Lo que midió el mini-benchmark ([resultados](../eval/results/embedding_choice.md), [ADR-0004](decisions/0004-modelo-de-embeddings.md)):
+
+- **Solo vectores superó a la búsqueda híbrida** en ese conjunto (Recall@1 100% frente a 90% con embeddinggemma). Pero las preguntas se escribieron a propósito sin palabras en común con la respuesta y no incluyen coincidencias exactas (números, nombres raros, identificadores), que es donde BM25 aporta. Se mantiene la fusión híbrida y se decide en el Hito 4 con datos más representativos, probando también RRF con pesos.
+- **No hay un umbral de similitud que separe** las preguntas con respuesta de las que no tienen. Por eso `min_recall_similarity` queda en 0 y la búsqueda siempre devuelve los vecinos más cercanos, aunque no tengan relación. Decidir que «no hay nada guardado sobre esto» le corresponde al agente.
 
 ## 7. Contratos MCP
 
@@ -166,15 +175,15 @@ Las fechas de entrada y salida van en ISO 8601. Los errores son estructurados (`
 | Herramienta | Entrada | Salida |
 |---|---|---|
 | `remember` | `content`, `kind="fact"`, `tags=[]`, `valid_from?`, `confidence?` | `memory`, `possible_supersedes: [{memory, score, matched_by}]` |
-| `recall` | `query`, `k=5` (máx. 50), `as_of?`, `include_history=false`, `kind?` | `mode`, `results: [...]` (§6) |
-| `supersede` | `old_id`, `new_content`, `valid_from?`, `reason?` | `new_id`, `old_id`, `old_valid_to` |
+| `recall` | `query`, `k=5` (máx. 50), `as_of?`, `include_history=false`, `kind?` | `mode`, `results: [...]` (§6), `warnings` |
+| `supersede` | `old_id`, `new_content`, `valid_from?`, `reason?` | `new`, `old` (con su `valid_to` cerrado), `warnings` |
 | `forget` | `id` | `deleted_ids: [...]` |
 | `history` | `id` | cadena ordenada de la versión más antigua a la más nueva |
 | `list_memories` | `kind?`, `status?`, `tag?`, `limit=20`, `cursor?` | `items`, `next_cursor` |
 
 **Cómo se detectan los «posibles reemplazos» en `remember`:**
 
-- Con embeddings: hechos vigentes del mismo workspace con similitud coseno ≥ umbral. El umbral es configurable y su valor por defecto se calibra en el Hito 4.
+- Con embeddings: hasta 3 hechos vigentes del mismo workspace con similitud coseno ≥ umbral. *(Hito 2)* El umbral depende del modelo y se calibró en el mini-benchmark: 0.51 para embeddinggemma (ADR-0004). Con él, F1 subió de 0.43 (BM25) a 0.76 y ninguna frase sin relación recibió propuestas. Pero las frases *del mismo tema* que no reemplazan nada («Ana trabaja como diseñadora» frente a «Ana vive en Madrid») sí las reciben: la similitud no distingue «actualiza» de «añade». Eso confirma con datos el ADR-0003: decide el agente.
 - Sin embeddings: top-3 por BM25. Es una señal más débil y se documenta como limitación. *(Hito 1)* Ejemplo real: «Migramos a SQLite para el MVP» **no** propone «El proyecto usa PostgreSQL», porque no comparten palabras. Es justo el caso que deben resolver los embeddings del Hito 2. Con BM25, `score` no es comparable entre consultas.
 
 Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si `remember` devuelve un posible reemplazo que contradice lo nuevo, llama a `supersede` en vez de dejar ambos». También avisan de que el contenido devuelto son **datos guardados**, no instrucciones.
@@ -207,7 +216,7 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 1. **`forget` borra la cadena completa**, no solo una versión.
 2. **Los `episode` son inmutables** y no se pueden reemplazar.
 3. **E2b (agente simulado con qwen3:8b)** queda como opcional para el Hito 4.
-4. **Modelo de embeddings para el Hito 2:** candidatos multilingües en Ollama: `qwen3-embedding:0.6b` y `embeddinggemma`. Son unos 600 MB de descarga, así que te preguntaré antes de bajarlo. Se elige con una mini-comparación sobre E1.
+4. **Modelo de embeddings:** se compararon `qwen3-embedding:0.6b` y `embeddinggemma` con un mini-benchmark propio. Elegido: **embeddinggemma** ([ADR-0004](decisions/0004-modelo-de-embeddings.md)). *(Hito 2)*
 5. **Nombre «vigente».**
 6. **Git:** propongo `git init` al empezar el Hito 1 y un commit por hito, con tu autorización en cada uno.
 
@@ -223,3 +232,7 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 | El agente puede no llamar a `supersede` | Descripciones claras de las herramientas; se mide en E2b; se documenta como limitación |
 | KNN de sqlite-vec es exacto (fuerza bruta) | Suficiente para la escala objetivo; se mide en el Hito 4 sin suponer cifras |
 | CLI y servidor MCP sobre el mismo archivo | WAL + `busy_timeout` |
+| Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `vigente reindex` completa lo pendiente |
+| Enviar memorias a un servicio remoto sin querer *(Hito 2)* | Toda URL no local se rechaza salvo con `VIGENTE_ALLOW_REMOTE=1`; la clave de API solo llega por entorno |
+| Umbral de reemplazos frágil *(Hito 2)* | Calibrado con solo 18 casos y margen estrecho (ADR-0004); se recalibra en el Hito 4 con más datos |
+| Vecinos sin relación en los resultados *(Hito 2)* | Ningún umbral los separa en los datos actuales; se documenta y lo decide el agente |
