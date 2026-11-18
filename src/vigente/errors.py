@@ -51,6 +51,12 @@ class ConfigError(VigenteError):
     code = "config"
 
 
+class DatabaseError(VigenteError):
+    """SQLite no pudo abrir el archivo, o está ocupado por otro proceso."""
+
+    code = "database"
+
+
 class EmbeddingError(VigenteError):
     code = "embedding_unavailable"
 

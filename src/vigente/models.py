@@ -85,8 +85,19 @@ MemoryId = Annotated[
     StringConstraints(strip_whitespace=True, pattern=r"^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$"),
     AfterValidator(str.upper),
 ]
+
+
+def _without_nul(value: str) -> str:
+    """SQLite mide un texto hasta su primer carácter nulo: uno al principio parecería vacío."""
+    if "\x00" in value:
+        raise ValueError(tr("el texto no puede contener el carácter nulo"))
+    return value
+
+
 Content = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_CONTENT_CHARS)
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_CONTENT_CHARS),
+    AfterValidator(_without_nul),
 ]
 Tag = Annotated[
     str, StringConstraints(strip_whitespace=True, to_lower=True, pattern=r"^[\w.:/-]{1,40}$")

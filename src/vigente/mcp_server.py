@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hmac
 import os
+import sqlite3
 import sys
 from collections.abc import Awaitable, Callable, Iterator, MutableMapping, Sequence
 from contextlib import contextmanager
@@ -27,7 +28,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, ValidationError
 
-from vigente import __version__
+from vigente import __version__, store
 from vigente.config import Settings
 from vigente.embeddings import Embedder
 from vigente.errors import VigenteError
@@ -202,6 +203,8 @@ def create_server(
             raise ToolError(exc.describe()) from exc
         except ValidationError as exc:
             raise ToolError(f"invalid_input: {describe_validation_error(exc)}") from exc
+        except sqlite3.Error as exc:  # por ejemplo, la base ocupada por otro proceso
+            raise ToolError(store.database_error(exc).describe()) from exc
 
     @server.tool(annotations=ADDITIVE)
     def remember(
@@ -526,6 +529,8 @@ def main(argv: list[str] | None = None) -> None:
         MemoryService.open(settings.db_path, settings.workspace).close()
     except VigenteError as exc:
         sys.exit(f"vigente-mcp: {exc.code}: {exc.message}")
+    except sqlite3.Error as exc:
+        sys.exit(f"vigente-mcp: {store.database_error(exc).describe()}")
     except ValidationError as exc:
         error = describe_validation_error(exc)
         sys.exit(tr("vigente-mcp: configuración no válida: {error}", error=error))

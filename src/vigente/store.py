@@ -23,7 +23,7 @@ from typing import Any
 
 import sqlite_vec
 
-from vigente.errors import ConfigError, SchemaVersionError
+from vigente.errors import ConfigError, DatabaseError, SchemaVersionError
 from vigente.i18n import tr
 from vigente.models import Kind, Memory, Status
 
@@ -197,6 +197,16 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
                 raise
         time.sleep(pause)
         pause = min(pause * 2, 0.1)
+
+
+def database_error(exc: sqlite3.Error) -> DatabaseError:
+    """Un fallo de SQLite, contado a quien usa la CLI o el servidor en vez de volcarlo."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        return DatabaseError(
+            tr("La base de datos está ocupada por otro proceso. Vuelve a intentarlo.")
+        )
+    return DatabaseError(tr("Error de la base de datos: {error}", error=exc))
 
 
 @contextmanager
