@@ -11,14 +11,19 @@
 
 from __future__ import annotations
 
+import argparse
+import hmac
+import os
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, MutableMapping
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated, Any, TypeVar
 
+import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, ValidationError
 
@@ -375,8 +380,90 @@ def create_server(
     return server
 
 
-def main() -> None:
+# --- HTTP: la misma memoria, compartida entre ordenadores (ADR-0009)
+
+TOKEN_ENV = "VIGENTE_TOKEN"
+MIN_TOKEN_CHARS = 32
+LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
+Scope = MutableMapping[str, Any]
+Receive = Callable[[], Awaitable[MutableMapping[str, Any]]]
+Send = Callable[[MutableMapping[str, Any]], Awaitable[None]]
+ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
+
+
+class RequireToken:
+    """Solo deja pasar las peticiones con `Authorization: Bearer <token>`.
+
+    La comparación es en tiempo constante, para que el tiempo de respuesta no revele cuántos
+    caracteres del token acierta quien prueba.
+    """
+
+    def __init__(self, app: ASGIApp, token: str) -> None:
+        self._app = app
+        self._expected = f"Bearer {token}".encode()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            supplied = dict(scope.get("headers", [])).get(b"authorization", b"")
+            if not hmac.compare_digest(supplied, self._expected):
+                body = b'{"error": "unauthorized"}'
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode()),
+                            (b"www-authenticate", b"Bearer"),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self._app(scope, receive, send)
+
+
+def create_http_app(
+    settings: Settings,
+    *,
+    token: str,
+    embedder: Embedder | None = None,
+    clock: Clock = utc_now,
+    host: str = "127.0.0.1",
+) -> ASGIApp:
+    """El servidor MCP por streamable HTTP, en /mcp, protegido con un token."""
+    if len(token) < MIN_TOKEN_CHARS:
+        raise ValueError(f"{TOKEN_ENV} necesita al menos {MIN_TOKEN_CHARS} caracteres")
+    server = create_server(settings, embedder=embedder, clock=clock)
+    # En localhost se mantiene la protección del SDK contra DNS rebinding (solo acepta Host
+    # locales). Fuera, ese filtro rechazaría a los propios clientes: protege el token.
+    security = (
+        None
+        if host in LOOPBACK
+        else TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    )
+    app = server.streamable_http_app(host=host, transport_security=security)
+    return RequireToken(app, token)
+
+
+def main(argv: list[str] | None = None) -> None:
     """Punto de entrada `vigente-mcp`. Configuración por variables de entorno (ver README)."""
+    parser = argparse.ArgumentParser(
+        prog="vigente-mcp", description="Servidor MCP de Vigente. Por defecto, por stdio."
+    )
+    parser.add_argument(
+        "--http", action="store_true", help=f"Servir por HTTP en /mcp. Exige {TOKEN_ENV}."
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="Con --http: dirección de escucha.")
+    parser.add_argument("--port", type=int, default=8765, help="Con --http: puerto.")
+    args = parser.parse_args(argv)
+    token = os.environ.get(TOKEN_ENV, "")
+    if args.http and len(token) < MIN_TOKEN_CHARS:
+        sys.exit(
+            f"vigente-mcp: para servir por HTTP hace falta {TOKEN_ENV} con al menos "
+            f"{MIN_TOKEN_CHARS} caracteres (por ejemplo, la salida de `openssl rand -hex 32`)."
+        )
     try:
         settings = Settings.from_env()
     except ValueError as exc:  # p. ej. un VIGENTE_SEARCH_MODE que no existe
@@ -390,7 +477,17 @@ def main() -> None:
     except ValidationError as exc:
         sys.exit(f"vigente-mcp: configuración no válida: {describe_validation_error(exc)}")
     try:
-        create_server(settings, embedder=embedder).run("stdio")
+        if not args.http:
+            create_server(settings, embedder=embedder).run("stdio")
+            return
+        if args.host not in LOOPBACK:
+            print(
+                "vigente-mcp: escuchando fuera de este ordenador. Ponlo detrás de HTTPS: sin "
+                "cifrado, el token viaja en claro.",
+                file=sys.stderr,
+            )
+        app = create_http_app(settings, token=token, embedder=embedder, host=args.host)
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     finally:
         if embedder is not None:
             embedder.close()

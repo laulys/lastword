@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2",
     "sqlite-vec==0.1.9",
     "typer>=0.29.2",
+    "uvicorn>=0.54.0",
 ]
 
 [project.urls]
