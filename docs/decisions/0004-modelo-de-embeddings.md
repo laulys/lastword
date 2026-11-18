@@ -23,8 +23,8 @@ El criterio para el umbral se fijó **antes** de ver los datos: el de mejor F1 y
 | Reemplazos: F1 (precisión / recall) | 0.43 (33% / 61%) | 0.73 (62% / 89%) | **0.76** (63% / 94%) |
 | Umbral elegido | sin umbral | 0.45 | 0.51 |
 | Búsqueda solo vector: Recall@1 | 70% (texto) | 95% | **100%** |
-| Búsqueda híbrida: Recall@1 | | 85% | **90%** |
-| Latencia de una consulta (p50) | | 19 ms | **15 ms** |
+| Búsqueda híbrida: Recall@1 | | 90% | **95%** |
+| Latencia de una consulta (p50) | | 23 ms | **13 ms** |
 | Tamaño del vector | | 1024 | **768** |
 
 ## Decisión
@@ -52,7 +52,7 @@ El umbral se volvió a calibrar con E1, el experimento sintético ([resultados](
 - **En la validación, 0.71 empeora mucho:** F2 de 0.86 con 0.51 frente a 0.49 con 0.71, porque el recall cae del 94% al 44%.
 - **Decisión: se mantiene 0.51.** Las frases de E1 salen de plantillas («Ana vive en…», «Ana trabaja en…») y se parecen entre sí más que las reales. Calibrar con ellas habría sobreajustado el umbral a las plantillas. La regla fijada de antemano lo evitó.
 - **Coste conocido:** con 0.51, en E1 la precisión de las propuestas es solo del 22%. Son sugerencias de más que el agente tiene que descartar, sobre todo otros datos de la misma persona o proyecto.
-- **Nota sobre la tabla de arriba:** al quitar el desempate por id de la fusión ([ADR-0006](0006-busqueda-por-vectores.md)), la búsqueda híbrida del mini-benchmark sube de 90% a 95% de Recall@1 con embeddinggemma y de 85% a 90% con qwen. Las demás cifras no cambian al repetirlo, y la elección del modelo tampoco.
+- **Nota sobre la tabla de arriba:** recoge la última ejecución del mini-benchmark. En la primera, la búsqueda híbrida daba 90% de Recall@1 con embeddinggemma y 85% con qwen: subió 5 puntos al quitar el desempate por id de la fusión ([ADR-0006](0006-busqueda-por-vectores.md)). La latencia cambia de una ejecución a otra (19 y 15 ms en la primera). La elección del modelo no cambia.
 
 ## Revisión en la v1.2: ¿se puede separar «actualiza» de «añade»?
 

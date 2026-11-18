@@ -6,13 +6,13 @@
 
 ## Contexto
 
-La búsqueda por vectores recorría todos los vectores exactos (768 números de 4 bytes cada uno). Su coste crecía de forma lineal, 62 ms con 50.000 memorias ([escala](../../eval/results/scale.md)), y era una de las limitaciones del README.
+La búsqueda por vectores recorría todos los vectores exactos (768 números de 4 bytes cada uno). Su coste crecía de forma lineal, 64 ms con 50.000 memorias, y era una de las limitaciones del README.
 
 sqlite-vec 0.1.9 no tiene índices aproximados (HNSW, IVF). Sí guarda vectores binarios, de 1 bit por dimensión, con los mismos filtros dentro de la búsqueda: workspace, tipo y fechas.
 
 ## Prueba previa
 
-Con los 89.539 mensajes reales de LongMemEval y sus 470 preguntas:
+Hecha a mano, sin script en el repositorio, con los 89.539 mensajes reales de LongMemEval y sus 470 preguntas:
 
 | Candidatos que se reordenan | Top 10 exacto recuperado | Mismo primer resultado | p50 |
 |---:|---:|---:|---:|
@@ -37,14 +37,16 @@ Recorrer los vectores binarios costaba solo 5,5 ms. El resto era leer los candid
 
 Con la regla fijada antes de medir ([protocolo](../../eval/README.md)):
 
-- **(a) Calidad:** el MRR de E1 (0,969) y el de E2 (0,956) son idénticos con la búsqueda exacta y con la de dos pasos. En E2 la búsqueda sí aproxima: unas 500 memorias por pregunta, de las que se reordenan 100.
+- **(a) Calidad:** el MRR de E1 (0,969) y el de E2 (0,956) son idénticos con la búsqueda exacta y con la de dos pasos. E1 sí pone a prueba la aproximación: reordena 100 candidatos de hasta 228 memorias. E2 la pone a prueba poco: guarda 244 mensajes de media por pregunta y pide 50 resultados, así que reordena 250 candidatos y en 328 de las 470 preguntas entran todos, es decir, la búsqueda es exacta. La evidencia de que aproximar no cambia el primer resultado es sobre todo la prueba previa. (La primera versión de este ADR decía «unas 500 memorias, de las que se reordenan 100»: era un error.)
 - **(b) Velocidad** ([escala](../../eval/results/scale.md), p50, sin el modelo de embeddings):
 
 | Memorias | `recall` antes | `recall` ahora | `remember` antes | `remember` ahora |
 |---:|---:|---:|---:|---:|
-| 10.000 | 12,7 ms | 2,2 ms | 5,6 ms | 0,5 ms |
-| 50.000 | 62,2 ms | 8,5 ms | 25,2 ms | 1,3 ms |
-| 200.000 | — | 36,5 ms | — | 4,4 ms |
+| 10.000 | 12,6 ms | 2,3 ms | 11,7 ms | 2,1 ms |
+| 50.000 | 63,6 ms | 6,8 ms | 57,6 ms | 7,1 ms |
+| 200.000 | — | 24,5 ms | — | 26,0 ms |
+
+Estas cifras se midieron de nuevo en la v1.3, con la misma prueba sobre la v1.1.0 («antes») y sobre la v1.3 («ahora»). La primera medición llenaba la base de episodios, con los que un hecho nuevo no se compara, y daba para `remember` 1,3 ms con 50.000 memorias: mejor de lo que es. Ahora la base es de hechos. «Ahora» incluye además un índice de la v1.3 que ahorra a `recall` unos 2 ms con 50.000 memorias.
 
 ## Alternativas descartadas
 
@@ -54,7 +56,7 @@ Con la regla fijada antes de medir ([protocolo](../../eval/README.md)):
 
 ## Consecuencias
 
-- ✅ `recall` es unas 7 veces más rápido con 50.000 memorias, y `remember` unas 19 veces, porque también busca los posibles reemplazos.
+- ✅ Con 50.000 memorias, `recall` es unas 9 veces más rápido y `remember` unas 8, porque guardar un hecho también busca sus posibles reemplazos.
 - ✅ Los resultados de E1 y E2 no cambian.
-- ⚠️ La base ocupa alrededor de un 30% más en disco: 247 MB frente a 191 MB con 50.000 memorias.
-- ⚠️ Sigue recorriendo todos los vectores, aunque comprimidos: el coste crece de forma lineal, con una pendiente siete veces menor. Con millones de memorias haría falta un índice aproximado, que sqlite-vec todavía no tiene.
+- ⚠️ La base ocupa alrededor de un 30% más en disco: 248 MB frente a 190 MB con 50.000 memorias.
+- ⚠️ Sigue recorriendo todos los vectores, aunque comprimidos: el coste crece de forma lineal, con una pendiente unas nueve veces menor. Con millones de memorias haría falta un índice aproximado, que sqlite-vec todavía no tiene.

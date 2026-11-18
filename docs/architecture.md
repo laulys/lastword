@@ -95,6 +95,11 @@ CREATE TABLE memories (
 );
 CREATE INDEX memories_ws_status ON memories(workspace_id, status);
 CREATE INDEX memories_ws_validity ON memories(workspace_id, valid_from, valid_to);
+-- v3 y v6: seguir la cadena de versiones en los dos sentidos sin recorrer la tabla.
+CREATE INDEX memories_superseded_by ON memories(superseded_by_id) WHERE superseded_by_id IS NOT NULL;
+CREATE INDEX memories_supersedes ON memories(supersedes_id) WHERE supersedes_id IS NOT NULL;
+-- v5: ¿a alguna memoria le falta el vector del modelo en uso? Se pregunta en cada búsqueda.
+CREATE INDEX memories_ws_embedding ON memories(workspace_id, embedding_model);
 
 -- Texto: tabla FTS5 propia (no external-content), con rowid = memories.seq.
 -- Duplica el texto, pero el borrado es un DELETE normal y no depende de triggers.
@@ -110,42 +115,49 @@ CREATE TABLE embedding_spaces (
   id          INTEGER PRIMARY KEY,
   model       TEXT NOT NULL,
   dim         INTEGER NOT NULL CHECK (dim BETWEEN 1 AND 8192),
-  table_name  TEXT NOT NULL UNIQUE,      -- "vec_1", "vec_2", ...
+  table_name  TEXT NOT NULL UNIQUE,      -- "vecb_1", "vecb_2", ...
   created_at  INTEGER NOT NULL,
   UNIQUE (model, dim)
 );
 
--- Creada al guardar el primer vector de cada espacio (ejemplo: embeddinggemma, 768 dim).
+-- Dos tablas por espacio, creadas al guardar su primer vector (ejemplo: embeddinggemma,
+-- 768 dimensiones). Desde la v1.2 la búsqueda va en dos pasos (ADR-0010).
+-- vecb_N: vectores de 1 bit por dimensión, con los filtros, para elegir candidatos.
 -- rowid = memories.seq, igual que en FTS.
-CREATE VIRTUAL TABLE vec_1 USING vec0(
+CREATE VIRTUAL TABLE vecb_1 USING vec0(
   workspace_id  TEXT PARTITION KEY,
   kind          TEXT,
   valid_from    INTEGER,
   valid_to      INTEGER,
-  embedding     FLOAT[768] distance_metric=cosine
+  embedding     BIT[768]
+);
+-- vecx_N: los vectores exactos, en una tabla normal, para reordenar los candidatos.
+CREATE TABLE vecx_1 (
+  seq        INTEGER PRIMARY KEY REFERENCES memories(seq),
+  embedding  BLOB NOT NULL
 );
 ```
 
 **Por qué `seq` además del ULID** *(Hito 1)*: el índice FTS se enlaza por número de fila. En tablas sin `INTEGER PRIMARY KEY`, `VACUUM` puede renumerar el rowid implícito, y eso desincronizaría el índice en silencio. `seq` es un alias explícito y estable; `id` sigue siendo el identificador público.
 
-**Por qué hay columnas duplicadas en `vec_N`:** `kind`, `valid_from` y `valid_to` se repiten ahí para que el filtro ocurra dentro del KNN (§2.1). *(Hito 2)* No hace falta `status`, porque la vigencia se decide por fechas (§5). Se mantienen sincronizadas en la misma transacción que `memories`, y `vigente doctor` comprueba que coincidan y que no haya vectores huérfanos.
+**Por qué hay columnas duplicadas en `vecb_N`:** `kind`, `valid_from` y `valid_to` se repiten ahí para que el filtro ocurra dentro del KNN (§2.1). *(Hito 2)* No hace falta `status`, porque la vigencia se decide por fechas (§5). Se mantienen sincronizadas en la misma transacción que `memories`, y `vigente doctor` comprueba que coincidan y que no haya vectores huérfanos.
 
-*(Hito 2)* **Borrar un vector también lo borra del disco:** sqlite-vec sobrescribe el vector dentro de su bloque al borrarlo y, con `secure_delete`, no quedan restos. Un test busca los bytes del vector en el archivo antes y después de `forget`. Importa porque un embedding puede revelar información del texto original.
+*(Hito 2)* **Borrar un vector también lo borra del disco:** sqlite-vec sobrescribe el vector dentro de su bloque al borrarlo y, con `secure_delete`, no quedan restos. Un test busca en el archivo los bytes del vector exacto y los de su copia binaria, antes y después de `forget`. Importa porque un embedding puede revelar información del texto original.
 
-**Invariante comprobada por tests y por `vigente doctor`:** el conjunto de ids de `memories`, `memories_fts` y el `vec_N` activo es el mismo (salvo memorias sin embedding, que no están en `vec_N`).
+**Invariante comprobada por tests y por `vigente doctor`:** el conjunto de ids de `memories`, `memories_fts` y el espacio vectorial activo es el mismo (salvo memorias sin embedding), y cada vector binario tiene su pareja exacta.
 
 ## 5. Reglas de dominio
 
 - **Reemplazar** (`supersede(old, new_content, valid_from=t)`), en una sola transacción:
   1. Inserta `new` con `valid_from = t` y `supersedes_id = old`. Si no se indica `t`, se usa `max(ahora, old.valid_from + 1 ms)`, para que un reemplazo en el mismo milisegundo no falle. El motivo (`reason`) se guarda en `new`. *(Hito 1)*
   2. Actualiza `old` con `valid_to = t`, `status = superseded` y `superseded_by_id = new`.
-  3. Actualiza los mismos campos en `vec_N` y añade `new` a FTS y a `vec_N`.
+  3. Actualiza los mismos campos en `vecb_N` y añade `new` a FTS y a las dos tablas de vectores.
 - **Solo se reemplazan `fact`.** Los `episode` («el 3 de mayo decidimos X») son registros de algo que pasó y no dejan de ser verdad. Por eso un `episode` tampoco puede tener `valid_from` en el futuro. *(Hito 1)*
 - **«Vigente en t»** significa `valid_from <= t < valid_to`, igual para hechos y episodios. `status` solo indica si la memoria tiene sucesora; la búsqueda filtra por fechas. Así, un hecho con `valid_from` futuro («desde enero el responsable será Luis») no aparece hasta que empieza. *(Hito 1)*
 - **Reemplazar algo ya reemplazado** devuelve un error con el id de su sucesor actual, para que el agente reintente sobre la versión vigente. Evita bifurcar la cadena.
-- **Un hecho nuevo puede reemplazar a varios** (`also_old_ids`): «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos. Cada hecho viejo apunta a la versión nueva con `superseded_by_id`, y la nueva guarda el principal en `supersedes_id`. Es todo o nada, y el historial recorre todas las versiones conectadas. Reglas y alternativas en el [ADR-0008](decisions/0008-un-hecho-reemplaza-a-varios.md).
+- **Un hecho nuevo puede reemplazar a varios** (`also_old_ids`): «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos. Cada hecho viejo apunta a la versión nueva con `superseded_by_id`, y la nueva guarda el principal en `supersedes_id`. Es todo o nada, y el historial recorre todas las versiones conectadas. A una versión que ya reemplazó un hecho se le pueden sumar otros después, con `new_id`. Reglas y alternativas en el [ADR-0008](decisions/0008-un-hecho-reemplaza-a-varios.md).
 - *(Hito 3)* **Enlazar en vez de crear:** `supersede` también acepta `new_id`, el id de una memoria ya guardada, normalmente la que `remember` acaba de guardar y que propuso como reemplazo. Sin esto, el flujo natural del agente dejaba el hecho duplicado. Reglas y alternativas en el [ADR-0005](decisions/0005-dos-formas-de-reemplazar.md).
-- **Olvidar** (`forget(id)`) borra **toda la cadena** del hecho (todas sus versiones, también las de los hechos que una versión unió) de `memories`, FTS y vector, y devuelve los ids borrados. Si alguien pide olvidar dónde vive, también debe desaparecer dónde vivía.
+- **Olvidar** (`forget(id)`) borra **toda la cadena** del hecho (todas sus versiones, también las de los hechos que una versión unió) de `memories`, FTS y vector, y devuelve los ids borrados. Si alguien pide olvidar dónde vive, también debe desaparecer dónde vivía. Si otra conexión está leyendo la base, SQLite no puede vaciar su registro de cambios (WAL): el borrado es efectivo, pero el texto sigue en ese archivo hasta que la conexión acabe, y `forget` lo avisa.
   - *(Hito 1)* Para que desaparezca también del disco:
     - `secure_delete=ON` sobrescribe las filas borradas.
     - Un `optimize` del índice FTS: FTS5 registra los borrados como marcas que solo aplica al fusionar segmentos, así que sin esto los términos sobreviven en segmentos antiguos.
@@ -168,7 +180,7 @@ Cada resultado devuelve la memoria completa, `score`, `matched_by` (`["fts"]`, `
 
 *(Hito 2)* Lo que midió el mini-benchmark ([resultados](../eval/results/embedding_choice.md), [ADR-0004](decisions/0004-modelo-de-embeddings.md)):
 
-- **Solo vectores superó a la búsqueda híbrida** en ese conjunto (Recall@1 100% frente a 90% con embeddinggemma). Pero las preguntas se escribieron a propósito sin palabras en común con la respuesta y no incluyen coincidencias exactas (números, nombres raros, identificadores), que es donde BM25 aporta. Se mantuvo la fusión híbrida hasta decidirlo en el Hito 4 con datos más representativos. *(Hito 4)* Con E1 y LongMemEval, solo vectores ganó también, y pasó a ser el modo por defecto (ADR-0006).
+- **Solo vectores superó a la búsqueda híbrida** en ese conjunto (Recall@1 100% frente a 95% con embeddinggemma). Pero las preguntas se escribieron a propósito sin palabras en común con la respuesta y no incluyen coincidencias exactas (números, nombres raros, identificadores), que es donde BM25 aporta. Se mantuvo la fusión híbrida hasta decidirlo en el Hito 4 con datos más representativos. *(Hito 4)* Con E1 y LongMemEval, solo vectores ganó también, y pasó a ser el modo por defecto (ADR-0006).
 - **No hay un umbral de similitud que separe** las preguntas con respuesta de las que no tienen. Por eso `min_recall_similarity` queda en 0 y la búsqueda siempre devuelve los vecinos más cercanos, aunque no tengan relación. Decidir que «no hay nada guardado sobre esto» le corresponde al agente.
 
 ## 7. Contratos MCP
@@ -181,8 +193,8 @@ Las fechas de entrada y salida van en ISO 8601. Los errores son estructurados (`
 |---|---|---|
 | `remember` (no destructiva) | `content`, `kind="fact"`, `tags?`, `valid_from?`, `confidence?` | `memory`, `possible_supersedes: [{memory, matched_by, similarity}]`, `next_step`, `warnings` |
 | `recall` (solo lectura) | `query`, `k=5` (máx. 50), `as_of?`, `include_history=false`, `kind?` | `mode`, `results: [...]`, `warnings` |
-| `supersede` (no destructiva) | `old_id` y **uno** de `new_content` / `new_id`; `reason?`; `valid_from?` (solo con `new_content`) | `new`, `old` (con su `valid_to` cerrado), `warnings` |
-| `forget` (**destructiva**) | `memory_id` | `deleted_ids: [...]` |
+| `supersede` (no destructiva) | `old_id`; `also_old_ids?`; **uno** de `new_content` / `new_id`; `reason?`; `valid_from?` (solo con `new_content`) | `new`, `old` (con su `valid_to` cerrado), `also_old`, `warnings` |
+| `forget` (**destructiva**) | `memory_id` | `deleted_ids: [...]`, `warnings` |
 | `history` (solo lectura) | `memory_id` | `versions`, de la más antigua a la vigente |
 | `list_memories` (solo lectura) | `kind?`, `status?`, `tag?`, `limit=20`, `cursor?` | `items`, `next_cursor` |
 
@@ -222,7 +234,7 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 - **E1:** la tesis se sostiene. Con la memoria ingenua, el primer resultado es una versión obsoleta en el 51% de las preguntas con búsqueda por vectores, el 44% con la híbrida y el 33% solo con texto; con Vigente, en el 0%. Recall@5 no empeora, sino que sube a 100%.
 - **E2 (LongMemEval):** sin reemplazos, en las preguntas de actualización la versión vieja sale antes que la nueva en torno a la mitad de las veces.
 - **Decisiones:** búsqueda por vectores por defecto, y el umbral se mantiene en 0.51 ([decisiones](../eval/results/decisions.md)).
-- **Escala:** [medida](../eval/results/scale.md) hasta 50.000 memorias.
+- **Escala:** [medida](../eval/results/scale.md) hasta 200.000 memorias.
 
 Lo que sigue de esta sección es el plan original.
 
@@ -264,7 +276,7 @@ Lo que sigue de esta sección es el plan original.
 | Sintaxis FTS5 en consultas del usuario | Tokenizar y citar cada token |
 | Mezcla de español e inglés | `unicode61` sin stemming; modelo de embeddings multilingüe |
 | El agente puede no llamar a `supersede` | Descripciones claras de las herramientas; se mide en E2b; se documenta como limitación |
-| KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crecía de forma lineal, 62 ms con 50.000 memorias. *(v1.2)* Búsqueda en dos pasos, binaria y luego exacta: 8,5 ms con 50.000 y 36,5 ms con 200.000, sin cambiar los resultados de E1 ni de E2. Sigue siendo lineal: con millones haría falta un índice aproximado (ADR-0010) |
+| KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crecía de forma lineal, 64 ms con 50.000 memorias. *(v1.2)* Búsqueda en dos pasos, binaria y luego exacta: 7 ms con 50.000 y 25 ms con 200.000, sin cambiar los resultados de E1 ni de E2. Sigue siendo lineal: con millones haría falta un índice aproximado (ADR-0010) |
 | Memoria envenenada o secretos guardados *(Hito 6)* | Se rechazan los secretos y los caracteres invisibles al guardar; las órdenes se marcan al leer, `recall` avisa y `vigente review` las lista. Las reglas no paran a un atacante que las conozca (ADR-0007) |
 | Varios clientes (CLI, Claude Code, Codex, Cursor) sobre el mismo archivo | WAL + `busy_timeout`. *(v1.0.1)* Al crear la base a la vez fallaba el 57% de las aperturas; el paso a WAL se reintenta y un test lo comprueba con cuatro procesos. Probado también con tres servidores MCP escribiendo a la vez |
 | Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `vigente reindex` completa lo pendiente |
@@ -284,3 +296,8 @@ Qué se decidió y qué alternativas se descartaron está en el [ADR-0007](decis
 - **Coste medido:** unos 13 µs por memoria al guardar y unos 25 µs por memoria leída. `vigente review` recorre el workspace entero, así que con 50.000 memorias rondaría el segundo (estimación, no medida).
 - **Evaluación:** E3 ([informe](../eval/results/e3_security.md)), con casos y reglas fijados antes de escribir los detectores, y una comprobación con los mensajes reales de LongMemEval que llevó a corregir la regla de tokens.
 - E2 guarda los mensajes de LongMemEval con `allow_secrets`: mide la búsqueda, no los filtros, y así sus resultados no cambian.
+- *(v1.3)* **Privacidad del archivo y de la red**, tras una auditoría del código:
+  - la carpeta y el archivo de la memoria se crean con permisos solo para su dueño (0700 y 0600);
+  - con un servicio de embeddings local se ignoran `HTTP_PROXY` y `ALL_PROXY`: si no, el texto de las memorias saldría hacia el proxy;
+  - `reindex` comprueba que la memoria sigue siendo la misma antes de guardar su vector, para que el de un texto olvidado no acabe en otra memoria;
+  - por HTTP, `--allowed-host` permite dejar el servidor en `127.0.0.1` con un proxy HTTPS delante ([ADR-0009](decisions/0009-compartir-por-http.md)).
