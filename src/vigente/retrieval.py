@@ -78,12 +78,15 @@ def search_vector(
     kind: Kind | None = None,
     min_similarity: float = 0.0,
 ) -> list[Hit]:
-    """Vecinos más cercanos. Score = similitud coseno (1 - distancia)."""
+    """Vecinos más cercanos. Score = similitud coseno (1 - distancia).
+
+    `min_similarity` 0 significa sin umbral: un vecino con similitud negativa también cuenta.
+    """
     rows = store.vector_search(conn, space, workspace_id, vector, limit=k, at_ms=at_ms, kind=kind)
     hits = []
     for memory, distance in rows:
         similarity = 1.0 - distance
-        if similarity >= min_similarity:
+        if min_similarity <= 0 or similarity >= min_similarity:
             hits.append(
                 Hit(memory=memory, score=similarity, matched_by=["vector"], similarity=similarity)
             )

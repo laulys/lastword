@@ -459,3 +459,17 @@ class TestSeveralModels:
         assert all((hit.similarity or 0.0) < 0.5 for hit in leaked)
         other.close()
         reindexing.close()
+
+
+def test_the_nearest_memory_is_returned_even_with_negative_similarity(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """Sin umbral, recall devuelve siempre los vecinos más cercanos, por lejos que estén."""
+    stored = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder([1.0, 0.0, 0.0, 0.0]))
+    ana = remember(stored, "Ana vive en Madrid")
+    opposite = MemoryService(
+        conn, "test", clock=clock, embedder=FixedEmbedder([-1.0, 0.0, 0.0, 0.0])
+    )
+    (hit,) = opposite.recall(RecallQuery(query="algo sin relación")).results
+    assert hit.memory.id == ana.id
+    assert hit.similarity == pytest.approx(-1.0)
