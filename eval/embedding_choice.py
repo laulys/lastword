@@ -30,7 +30,7 @@ from metrics import cosine, rank_metrics
 
 from vigente import retrieval, store
 from vigente.embeddings import OpenAICompatibleEmbedder, Purpose
-from vigente.models import Kind, NewMemory, RecallQuery
+from vigente.models import Kind, NewMemory, RecallQuery, SearchMode
 from vigente.service import MemoryService
 
 HERE = Path(__file__).parent
@@ -127,7 +127,10 @@ def evaluate(model: str, data: dict[str, Any]) -> dict[str, Any]:
 
     # 2. Búsqueda con el código real: hechos + frases relacionadas y sin relación como ruido.
     conn = store.connect(":memory:")
-    service = MemoryService(conn, "eval", clock=lambda: NOW, embedder=embedder)
+    # La fila «híbrida» mide la fusión: se pide explícitamente, sea cual sea el modo por defecto.
+    service = MemoryService(
+        conn, "eval", clock=lambda: NOW, embedder=embedder, search_mode=SearchMode.HYBRID
+    )
     corpus = list(facts.values()) + [r["new"] for r in data["related"]] + data["unrelated"]
     for text in corpus:
         service.remember(NewMemory(content=text))

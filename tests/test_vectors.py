@@ -11,7 +11,15 @@ from tests.fakes import DATABASE_WORDS, FailingEmbedder, FakeEmbedder, FixedEmbe
 from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
 from vigente import store
 from vigente.errors import ConfigError, NotSupersedableError
-from vigente.models import Hit, Kind, Memory, NewMemory, RecallQuery, SupersedeRequest
+from vigente.models import (
+    Hit,
+    Kind,
+    Memory,
+    NewMemory,
+    RecallQuery,
+    SearchMode,
+    SupersedeRequest,
+)
 from vigente.retrieval import hybrid, reciprocal_rank_fusion
 from vigente.service import MemoryService
 
@@ -103,7 +111,12 @@ class TestPossibleSupersedes:
 
 
 class TestHybridRecall:
-    def test_combines_text_and_vector_results(self, semantic: MemoryService) -> None:
+    def test_combines_text_and_vector_results(
+        self, conn: sqlite3.Connection, clock: FakeClock, embedder: FakeEmbedder
+    ) -> None:
+        semantic = MemoryService(
+            conn, "test", clock=clock, embedder=embedder, search_mode=SearchMode.HYBRID
+        )
         remember(semantic, "Desplegamos en Fly.io")
         both = remember(semantic, "El proyecto usa SQLite")
         only_vector = remember(semantic, "Guardamos todo en PostgreSQL")
@@ -306,3 +319,43 @@ def test_weights_shift_the_fusion_towards_one_ranking() -> None:
     assert [h.memory.id for h in weighted] == ["B", "A"]
     with pytest.raises(ValueError):
         reciprocal_rank_fusion([text, vector], limit=2, weights=[1.0])
+
+
+class TestSearchModes:
+    """Por defecto se busca por significado (eval/results/decisions.md)."""
+
+    def test_default_mode_is_vector(self, semantic: MemoryService) -> None:
+        memory = remember(semantic, "Guardamos todo en PostgreSQL")
+        result = semantic.recall(RecallQuery(query="¿Qué base de datos usamos?"))
+        assert result.mode == "vector"
+        assert [(hit.memory.id, hit.matched_by) for hit in result.results][:1] == [
+            (memory.id, ["vector"])
+        ]
+
+    def test_text_mode_never_embeds_the_query(
+        self, conn: sqlite3.Connection, clock: FakeClock, embedder: FakeEmbedder
+    ) -> None:
+        service = MemoryService(
+            conn, "test", clock=clock, embedder=embedder, search_mode=SearchMode.TEXT
+        )
+        memory = remember(service, "Ana vive en Madrid")
+        result = service.recall(RecallQuery(query="Ana Madrid"))
+        assert (result.mode, [hit.memory.id for hit in result.results]) == ("fts_only", [memory.id])
+        assert "query" not in [purpose for purpose, _ in embedder.calls]
+
+
+def test_memories_without_vectors_are_still_found(
+    conn: sqlite3.Connection, clock: FakeClock, embedder: FakeEmbedder
+) -> None:
+    offline = remember(
+        MemoryService(conn, "test", clock=clock, embedder=FailingEmbedder()), "Ana vive en Madrid"
+    )
+    online = MemoryService(conn, "test", clock=clock, embedder=embedder)
+    remember(online, "El proyecto usa SQLite")
+    result = online.recall(RecallQuery(query="Ana Madrid"))
+    assert result.mode == "hybrid"
+    assert offline.id in [hit.memory.id for hit in result.results]
+    assert any("reindex" in warning for warning in result.warnings)
+    online.reindex()
+    result = online.recall(RecallQuery(query="Ana Madrid"))
+    assert (result.mode, result.warnings) == ("vector", [])

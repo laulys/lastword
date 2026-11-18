@@ -126,3 +126,17 @@ def test_list_shows_the_state_by_date_not_by_status(db_path: Path) -> None:
     assert "vigente" in listed  # 9:30: tiene sucesora, pero sigue vigente hasta 2099
     assert "futura" in listed
     assert "reemplazada" not in listed
+
+
+def test_search_mode_from_the_environment_ignores_case(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIGENTE_SEARCH_MODE", " Hybrid ")  # el servidor MCP también lo acepta
+    ok(run(db_path, "add", "Ana vive en Madrid"))
+    assert ok(run(db_path, "search", "Ana"))["mode"] == "fts_only"  # sin embeddings en los tests
+
+
+def test_unknown_search_mode_is_a_clear_usage_error(db_path: Path) -> None:
+    result = run(db_path, "--search-mode", "magia", "stats")
+    assert result.exit_code == 2
+    assert "'magia' no existe" in result.output

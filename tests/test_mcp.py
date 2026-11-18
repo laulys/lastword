@@ -196,10 +196,15 @@ async def test_runs_over_stdio_as_a_real_subprocess(tmp_path: Path) -> None:
     assert [hit["memory"]["id"] for hit in found["results"]] == [saved["memory"]["id"]]
 
 
-def test_bad_configuration_fails_at_startup_with_a_clear_message(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "override", [{"VIGENTE_WORKSPACE": "Workspace No Válido"}, {"VIGENTE_SEARCH_MODE": "magia"}]
+)
+def test_bad_configuration_fails_at_startup_with_a_clear_message(
+    tmp_path: Path, override: dict[str, str]
+) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "vigente.mcp_server"],
-        env=_server_env(tmp_path, VIGENTE_WORKSPACE="Workspace No Válido"),
+        env=_server_env(tmp_path, **override),
         capture_output=True,
         text=True,
         timeout=60,

@@ -30,6 +30,14 @@ class Kind(StrEnum):
     EPISODE = "episode"  # algo que pasó; no se reemplaza
 
 
+class SearchMode(StrEnum):
+    """Cómo busca `recall`. Por defecto, vector: ganó en E1 y E2 (eval/results/decisions.md)."""
+
+    VECTOR = "vector"  # por significado
+    HYBRID = "hybrid"  # significado + palabras, fusionados con RRF
+    TEXT = "text"  # solo palabras (BM25)
+
+
 class Status(StrEnum):
     ACTIVE = "active"  # no tiene sucesor
     SUPERSEDED = "superseded"  # otra memoria la reemplazó
@@ -164,7 +172,7 @@ class SupersedeResult(BaseModel):
 
 
 class RecallResult(BaseModel):
-    mode: Literal["fts_only", "hybrid"]
+    mode: Literal["vector", "hybrid", "fts_only"]  # el que se usó de verdad
     results: list[Hit]
     warnings: list[str] = Field(default_factory=list)
 

@@ -114,7 +114,10 @@ class RememberOutput(BaseModel):
 
 
 class RecallOutput(BaseModel):
-    mode: str = Field(description='"hybrid" (palabras + significado) o "fts_only" (solo palabras)')
+    mode: str = Field(
+        description='"vector" (significado), "hybrid" (significado + palabras) o '
+        '"fts_only" (solo palabras)'
+    )
     results: list[HitView]
     warnings: list[str] = Field(default_factory=list)
 
@@ -155,7 +158,11 @@ def create_server(
     @contextmanager
     def service() -> Iterator[MemoryService]:
         memory_service = MemoryService.open(
-            settings.db_path, settings.workspace, clock=clock, embedder=embedder
+            settings.db_path,
+            settings.workspace,
+            clock=clock,
+            embedder=embedder,
+            search_mode=settings.search_mode,
         )
         try:
             yield memory_service
@@ -340,7 +347,10 @@ def create_server(
 
 def main() -> None:
     """Punto de entrada `vigente-mcp`. Configuración por variables de entorno (ver README)."""
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+    except ValueError as exc:  # p. ej. un VIGENTE_SEARCH_MODE que no existe
+        sys.exit(f"vigente-mcp: configuración no válida: {exc}")
     try:
         embedder = settings.embedding.build()
         # Fallar al arrancar, con un mensaje claro, si la base o el workspace no sirven.

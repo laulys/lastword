@@ -22,6 +22,7 @@ from vigente.config import (
     DEFAULT_EMBED_MODEL,
     DEFAULT_WORKSPACE,
     EmbeddingSettings,
+    parse_search_mode,
 )
 from vigente.embeddings import DEFAULT_BASE_URL
 from vigente.errors import VigenteError
@@ -34,6 +35,7 @@ from vigente.models import (
     RecallQuery,
     RecallResult,
     RememberResult,
+    SearchMode,
     Status,
     SupersedeRequest,
     SupersedeResult,
@@ -59,6 +61,7 @@ class Options:
     workspace: str
     as_json: bool
     embedding: EmbeddingSettings
+    search_mode: SearchMode
 
 
 @app.callback()
@@ -91,6 +94,14 @@ def main(
             help="URL del servicio de embeddings. Si no es local, exige VIGENTE_ALLOW_REMOTE=1.",
         ),
     ] = DEFAULT_BASE_URL,
+    search_mode: Annotated[
+        str,
+        typer.Option(
+            "--search-mode",
+            envvar="VIGENTE_SEARCH_MODE",
+            help="vector (por defecto), hybrid (vector + texto) o text.",
+        ),
+    ] = SearchMode.VECTOR.value,
 ) -> None:
     # La clave de API y el permiso de envío remoto solo se leen del entorno, nunca de
     # argumentos: no deben quedar en el historial de la shell.
@@ -99,7 +110,15 @@ def main(
         workspace=workspace,
         as_json=as_json,
         embedding=EmbeddingSettings.from_env(model=embed_model, base_url=embed_url),
+        search_mode=_parse_search_mode(search_mode),
     )
+
+
+def _parse_search_mode(raw: str) -> SearchMode:
+    try:
+        return parse_search_mode(raw)  # mismo criterio que el servidor MCP
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--search-mode") from None
 
 
 # --- infraestructura
@@ -134,7 +153,9 @@ def _service(ctx: typer.Context) -> Iterator[MemoryService]:
     embedder = None
     try:
         embedder = options.embedding.build()
-        service = MemoryService.open(options.db, options.workspace, embedder=embedder)
+        service = MemoryService.open(
+            options.db, options.workspace, embedder=embedder, search_mode=options.search_mode
+        )
         yield service
     except VigenteError as exc:
         _fail(options, exc.code, exc.message, current_id=exc.current_id)
@@ -230,7 +251,9 @@ def _hits_table(hits: list[Hit], title: str | None = None) -> Table:
 
 
 def _render_recall(result: RecallResult) -> None:
-    mode = "texto + vectores" if result.mode == "hybrid" else "solo texto"
+    mode = {"vector": "por significado", "hybrid": "significado + texto"}.get(
+        result.mode, "solo texto"
+    )
     out.print(_hits_table(result.results, title=f"búsqueda: {mode}"))
 
 

@@ -590,6 +590,18 @@ def count_without_vector(
     return int(conn.execute(sql, (workspace_id,)).fetchone()[0])
 
 
+def has_memories_without_vector(conn: sqlite3.Connection, workspace_id: str, model: str) -> bool:
+    """¿Alguna memoria sin vector de `model`? (Guardada con el servicio caído, o de otro modelo.)
+
+    Recorre la tabla si no falta ninguno: 6 ms con 50.000 memorias (eval/results/scale.md).
+    """
+    row = conn.execute(
+        "SELECT 1 FROM memories WHERE workspace_id = ? AND embedding_model IS NOT ? LIMIT 1",
+        (workspace_id, model),
+    ).fetchone()
+    return row is not None
+
+
 def has_vector(conn: sqlite3.Connection, space: EmbeddingSpace, seq: int) -> bool:
     row = conn.execute(f"SELECT 1 FROM {space.table} WHERE rowid = ?", (seq,)).fetchone()
     return row is not None

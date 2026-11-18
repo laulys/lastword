@@ -40,6 +40,7 @@ from vigente.models import (
     RecallResult,
     ReindexResult,
     RememberResult,
+    SearchMode,
     SupersedeRequest,
     SupersedeResult,
     WorkspaceId,
@@ -80,10 +81,12 @@ class MemoryService:
         *,
         clock: Clock = utc_now,
         embedder: Embedder | None = None,
+        search_mode: SearchMode = SearchMode.VECTOR,
     ) -> None:
         self._conn = conn
         self._clock = clock
         self._embedder = embedder
+        self._search_mode = search_mode
         self.workspace_id: str = _workspace_id.validate_python(workspace_id)
         # Solo se escribe si el workspace no existe: así abrir el servicio para leer (por
         # ejemplo, en cada llamada MCP) no toma el bloqueo de escritura de la base.
@@ -99,10 +102,11 @@ class MemoryService:
         *,
         clock: Clock = utc_now,
         embedder: Embedder | None = None,
+        search_mode: SearchMode = SearchMode.VECTOR,
     ) -> MemoryService:
         conn = store.connect(db_path)
         try:
-            return cls(conn, workspace_id, clock=clock, embedder=embedder)
+            return cls(conn, workspace_id, clock=clock, embedder=embedder, search_mode=search_mode)
         except BaseException:
             conn.close()
             raise
@@ -279,28 +283,33 @@ class MemoryService:
             return self._chain(self._require(memory_id))
 
     def recall(self, query: RecallQuery) -> RecallResult:
+        """Busca según el modo configurado. Sin embeddings, o si fallan, cae a texto y avisa."""
         if query.include_history:
             at_ms = None
         else:
             at_ms = store.to_ms(query.as_of if query.as_of is not None else self._now())
         pool = _candidate_pool(query.k)
-        text_hits = retrieval.search_fts(
-            self._conn, self.workspace_id, query.query, k=pool, at_ms=at_ms, kind=query.kind
-        )
+
+        def text_hits() -> list[Hit]:
+            return retrieval.search_fts(
+                self._conn, self.workspace_id, query.query, k=pool, at_ms=at_ms, kind=query.kind
+            )
+
         warnings: list[str] = []
+        if self._search_mode is SearchMode.TEXT or self._embedder is None:
+            return RecallResult(mode="fts_only", results=text_hits()[: query.k])
         vector = self._embed(query.query, "query", warnings)
-        if self._embedder is None or vector is None:
-            return RecallResult(mode="fts_only", results=text_hits[: query.k], warnings=warnings)
+        if vector is None:
+            return RecallResult(mode="fts_only", results=text_hits()[: query.k], warnings=warnings)
         space = store.find_embedding_space(self._conn, self._embedder.model, len(vector))
         if space is None:
-            # No hay vectores de este modelo y dimensión: la búsqueda es solo de texto, y se
-            # dice, en vez de llamarla híbrida.
+            # No hay vectores de este modelo y dimensión: se busca solo por texto, y se dice.
             if store.count_without_vector(self._conn, self.workspace_id, None):
                 warnings.append(
                     f"No hay vectores de {self._embedder.model} ({len(vector)} dimensiones). "
                     "Ejecuta `vigente reindex`. Se usó solo la búsqueda de texto."
                 )
-            return RecallResult(mode="fts_only", results=text_hits[: query.k], warnings=warnings)
+            return RecallResult(mode="fts_only", results=text_hits()[: query.k], warnings=warnings)
         vector_hits = retrieval.search_vector(
             self._conn,
             space,
@@ -311,7 +320,18 @@ class MemoryService:
             kind=query.kind,
             min_similarity=self._embedder.profile.min_recall_similarity,
         )
-        fused = retrieval.reciprocal_rank_fusion([text_hits, vector_hits], limit=query.k)
+        if self._search_mode is SearchMode.VECTOR:
+            model = self._embedder.model
+            if not store.has_memories_without_vector(self._conn, self.workspace_id, model):
+                return RecallResult(
+                    mode="vector", results=vector_hits[: query.k], warnings=warnings
+                )
+            # Las memorias sin vector solo las encuentra el texto: se combina para no perderlas.
+            warnings.append(
+                f"Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para no "
+                "perderlas. Ejecuta `vigente reindex`."
+            )
+        fused = retrieval.hybrid(text_hits(), vector_hits, limit=query.k)
         return RecallResult(mode="hybrid", results=fused, warnings=warnings)
 
     def list_memories(self, query: ListQuery) -> Page:

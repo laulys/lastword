@@ -189,3 +189,13 @@ class TestSettings:
             True,
         )
         assert EmbeddingSettings.from_env(env, model="none").model is None
+
+
+def test_search_mode_comes_from_the_environment() -> None:
+    from vigente.config import Settings
+    from vigente.models import SearchMode
+
+    assert Settings.from_env({}).search_mode is SearchMode.VECTOR
+    assert Settings.from_env({"VIGENTE_SEARCH_MODE": " Hybrid "}).search_mode is SearchMode.HYBRID
+    with pytest.raises(ValueError, match="usa vector, hybrid, text"):
+        Settings.from_env({"VIGENTE_SEARCH_MODE": "magia"})

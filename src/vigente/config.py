@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vigente.embeddings import DEFAULT_BASE_URL, OpenAICompatibleEmbedder
+from vigente.models import SearchMode
 
 DEFAULT_EMBED_MODEL = "embeddinggemma"  # ver ADR-0004
 DEFAULT_DB_PATH = Path("~/.vigente/vigente.db")
@@ -60,6 +61,7 @@ class Settings:
     db_path: Path = DEFAULT_DB_PATH
     workspace: str = DEFAULT_WORKSPACE
     embedding: EmbeddingSettings = field(default_factory=lambda: EmbeddingSettings(model=None))
+    search_mode: SearchMode = SearchMode.VECTOR
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> Settings:
@@ -67,4 +69,17 @@ class Settings:
             db_path=Path(env.get("VIGENTE_DB") or DEFAULT_DB_PATH).expanduser(),
             workspace=env.get("VIGENTE_WORKSPACE") or DEFAULT_WORKSPACE,
             embedding=EmbeddingSettings.from_env(env),
+            search_mode=parse_search_mode(env.get("VIGENTE_SEARCH_MODE", "")),
         )
+
+
+def parse_search_mode(raw: str) -> SearchMode:
+    """Un único criterio para la CLI y el servidor MCP: sin distinguir mayúsculas ni espacios."""
+    value = raw.strip().lower()
+    if not value:
+        return SearchMode.VECTOR
+    try:
+        return SearchMode(value)
+    except ValueError:
+        options = ", ".join(mode.value for mode in SearchMode)
+        raise ValueError(f"el modo de búsqueda {raw!r} no existe; usa {options}") from None
