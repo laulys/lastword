@@ -12,7 +12,7 @@ from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, super
 from vigente import store
 from vigente.errors import ConfigError, NotSupersedableError
 from vigente.models import Hit, Kind, Memory, NewMemory, RecallQuery, SupersedeRequest
-from vigente.retrieval import reciprocal_rank_fusion
+from vigente.retrieval import hybrid, reciprocal_rank_fusion
 from vigente.service import MemoryService
 
 
@@ -246,9 +246,15 @@ class TestReciprocalRankFusion:
         assert fused[2].matched_by == ["fts"]
         assert fused[0].score == pytest.approx(1 / 61 + 1 / 62)
 
-    def test_respects_the_limit_and_breaks_ties_deterministically(self) -> None:
-        fused = reciprocal_rank_fusion([[_hit("Z", "fts")], [_hit("Y", "vector")]], limit=1)
-        assert [hit.memory.id for hit in fused] == ["Y"]
+    def test_ties_prefer_the_earlier_ranking_not_the_id(self) -> None:
+        # Los ULID tienen una parte aleatoria: desempatar por id cambiaría entre ejecuciones.
+        first, second = [_hit("Z", "vector")], [_hit("A", "fts")]
+        assert [h.memory.id for h in reciprocal_rank_fusion([first, second], limit=2)] == ["Z", "A"]
+        assert [h.memory.id for h in reciprocal_rank_fusion([second, first], limit=2)] == ["A", "Z"]
+
+    def test_hybrid_gives_vectors_priority_in_ties(self) -> None:
+        fused = hybrid([_hit("A", "fts")], [_hit("Z", "vector")], limit=1)
+        assert [hit.memory.id for hit in fused] == ["Z"]
 
 
 class TestReviewFixes:
@@ -290,3 +296,13 @@ def test_linking_updates_the_vector_index(semantic: MemoryService, clock: FakeCl
     semantic.supersede(SupersedeRequest(old_id=postgres.id, new_id=sqlite.id))
     assert recall_ids(semantic, "base de datos") == [sqlite.id]
     assert semantic.doctor() == []
+
+
+def test_weights_shift_the_fusion_towards_one_ranking() -> None:
+    text = [_hit("A", "fts"), _hit("B", "fts")]
+    vector = [_hit("B", "vector"), _hit("A", "vector")]
+    assert [h.memory.id for h in reciprocal_rank_fusion([text, vector], limit=2)] == ["A", "B"]
+    weighted = reciprocal_rank_fusion([text, vector], limit=2, weights=[1.0, 2.0])
+    assert [h.memory.id for h in weighted] == ["B", "A"]
+    with pytest.raises(ValueError):
+        reciprocal_rank_fusion([text, vector], limit=2, weights=[1.0])

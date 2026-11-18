@@ -91,21 +91,32 @@ def search_vector(
 
 
 def reciprocal_rank_fusion(
-    rankings: Sequence[Sequence[Hit]], *, limit: int, k: int = RRF_K
+    rankings: Sequence[Sequence[Hit]],
+    *,
+    limit: int,
+    k: int = RRF_K,
+    weights: Sequence[float] | None = None,
 ) -> list[Hit]:
     """Combina rankings con RRF: score(d) = suma de 1 / (k + posición de d en cada ranking).
 
     Solo usa posiciones, así que no hace falta normalizar BM25 y coseno, que están en escalas
-    incomparables. Desempate determinista: mejor posición individual y luego id.
+    incomparables. `weights` multiplica la aportación de cada ranking (por defecto, 1).
+
+    Desempate: mejor posición individual y, si coincide, la lista que va antes en `rankings`
+    (pásalas por prioridad). No se desempata por id: los ULID tienen una parte aleatoria y el
+    orden cambiaría entre ejecuciones.
     """
+    weights = [1.0] * len(rankings) if weights is None else list(weights)
+    if len(weights) != len(rankings):
+        raise ValueError("Hace falta un peso por ranking")
     scores: dict[str, float] = {}
-    best_rank: dict[str, int] = {}
+    best: dict[str, tuple[int, int]] = {}  # (mejor posición, índice de su lista)
     merged: dict[str, Hit] = {}
-    for ranking in rankings:
+    for index, (ranking, weight) in enumerate(zip(rankings, weights, strict=True)):
         for rank, hit in enumerate(ranking, start=1):
             key = hit.memory.id
-            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
-            best_rank[key] = min(best_rank.get(key, rank), rank)
+            scores[key] = scores.get(key, 0.0) + weight / (k + rank)
+            best[key] = min(best.get(key, (rank, index)), (rank, index))
             previous = merged.get(key)
             if previous is None:
                 merged[key] = hit
@@ -117,5 +128,19 @@ def reciprocal_rank_fusion(
             merged[key] = previous.model_copy(
                 update={"matched_by": sources, "similarity": similarity}
             )
-    order = sorted(scores, key=lambda key: (-scores[key], best_rank[key], key))
+    order = sorted(scores, key=lambda key: (-scores[key], best[key]))
     return [merged[key].model_copy(update={"score": scores[key]}) for key in order[:limit]]
+
+
+def hybrid(
+    text_hits: Sequence[Hit],
+    vector_hits: Sequence[Hit],
+    *,
+    limit: int,
+    vector_weight: float = 1.0,
+) -> list[Hit]:
+    """Fusión híbrida de Vigente: los vectores tienen prioridad en los empates, porque fueron
+    el modo más preciso en la evaluación (eval/results/decisions.md)."""
+    return reciprocal_rank_fusion(
+        [vector_hits, text_hits], limit=limit, weights=[vector_weight, 1.0]
+    )
