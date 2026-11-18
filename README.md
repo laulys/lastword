@@ -6,7 +6,7 @@ Memoria para agentes de IA que sabe qué sigue siendo verdad.
 
 Cuando un hecho cambia, Vigente no lo borra ni lo mezcla con el nuevo: lo marca como reemplazado y guarda la cadena de cambios. Por defecto solo devuelve lo vigente, y también puede responder qué era verdad en una fecha concreta.
 
-> **En construcción.** Hito 3 de 5: servidor MCP sobre un núcleo local con SQLite, búsqueda híbrida y validez temporal. Próximo: evaluación.
+> **En construcción.** Hito 4 de 5: servidor MCP sobre un núcleo local con SQLite, búsqueda por significado y validez temporal, evaluado con datos sintéticos y LongMemEval. Próximo: cierre.
 
 ## Hoja de ruta
 
@@ -14,7 +14,7 @@ Cuando un hecho cambia, Vigente no lo borra ni lo mezcla con el nuevo: lo marca 
 - [x] **Hito 1. Núcleo:** SQLite + FTS5, reemplazos con validez temporal, borrado verificado en disco y CLI.
 - [x] **Hito 2. Búsqueda semántica:** embeddings locales, índice vectorial, búsqueda híbrida y elección del modelo con un benchmark propio.
 - [x] **Hito 3. Servidor MCP:** seis herramientas, probadas con el cliente oficial por stdio y con un agente real.
-- [ ] **Hito 4. Evaluación:** datos sintéticos y LongMemEval, con resultados publicados tal como salgan.
+- [x] **Hito 4. Evaluación:** datos sintéticos y LongMemEval, con las reglas de decisión fijadas antes de medir y los resultados publicados tal como salieron.
 - [ ] **Hito 5. Cierre:** README final y demo.
 
 ## Probarlo
@@ -66,10 +66,16 @@ Cuando el agente guarda algo que deja obsoleto un hecho anterior, `remember` se 
 | `VIGENTE_EMBED_BASE_URL` | `http://localhost:11434/v1` | Cualquier servicio compatible con la API de OpenAI |
 | `VIGENTE_EMBED_API_KEY` | | Solo si el servicio la pide |
 | `VIGENTE_ALLOW_REMOTE` | desactivado | Necesario para enviar memorias a un servicio no local |
+| `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectores + texto) o `text`; ver [ADR-0006](docs/decisions/0006-busqueda-por-vectores.md) |
 
 Si el servicio de embeddings no responde, Vigente sigue funcionando con búsqueda de texto y lo avisa. `vigente reindex` calcula después los vectores pendientes.
 
 ## Resultados
+
+- **[Datos obsoletos](eval/results/e1_synthetic.md):** con una memoria que guarda cada versión como un hecho más, el primer resultado es una versión obsoleta en el 51% de las preguntas con búsqueda por vectores (44% con la híbrida). Con Vigente, en el 0%, sin perder acierto.
+- **[LongMemEval](eval/results/e2_longmemeval.md), 470 preguntas:** sin reemplazos, en las preguntas de actualización la versión vieja sale antes que la nueva en torno a la mitad de las veces, con cualquier modo de búsqueda.
+- **[Escala](eval/results/scale.md):** con 50.000 memorias, una búsqueda tarda 62 ms y un borrado completo 52 ms, más unos 15 ms del modelo.
+- **[Decisiones](eval/results/decisions.md)** tomadas con esos datos: búsqueda por vectores por defecto, y el umbral de reemplazos se mantiene.
 
 - [Demo con un agente real](eval/results/agent_demo.md): cuatro sesiones independientes de Claude Code que solo comparten Vigente. El agente guarda, detecta y enlaza cambios sin duplicar hechos (incluido uno anunciado para la semana siguiente) y en una sesión nueva responde con lo vigente.
 - [Elección del modelo de embeddings](eval/results/embedding_choice.md): con embeddings, la detección de hechos reemplazados sube de F1 0.43 a 0.76 en un conjunto pequeño en español.
@@ -82,6 +88,7 @@ VIGENTE_TEST_OLLAMA=1 uv run pytest tests/test_ollama.py   # con Ollama local
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests eval
 uv run python eval/embedding_choice.py                 # repite el benchmark
+# evaluación completa: ver eval/README.md
 uv run python eval/agent_demo.py                       # demo con un agente (requiere la CLI de Claude)
 ```
 

@@ -43,3 +43,13 @@ El criterio para el umbral se fijó **antes** de ver los datos: el de mejor F1 y
 - 🔁 **Pendiente para el Hito 4:**
   - Recalibrar el umbral con más datos.
   - Comparar la fusión híbrida con solo vectores y con RRF con pesos, usando preguntas que incluyan coincidencias exactas.
+
+## Revisión en el hito 4
+
+El umbral se volvió a calibrar con E1, el experimento sintético ([resultados](../../eval/results/e1_synthetic.md)). Antes de ejecutarlo se fijó la regla: mejor **F2** en E1, aceptado solo si en el conjunto escrito a mano su F2 no empeora.
+
+- **En E1, el mejor F2 sale con 0.71.**
+- **En la validación, 0.71 empeora mucho:** F2 de 0.86 con 0.51 frente a 0.49 con 0.71, porque el recall cae del 94% al 44%.
+- **Decisión: se mantiene 0.51.** Las frases de E1 salen de plantillas («Ana vive en…», «Ana trabaja en…») y se parecen entre sí más que las reales. Calibrar con ellas habría sobreajustado el umbral a las plantillas. La regla fijada de antemano lo evitó.
+- **Coste conocido:** con 0.51, en E1 la precisión de las propuestas es solo del 22%. Son sugerencias de más que el agente tiene que descartar, sobre todo otros datos de la misma persona o proyecto.
+- **Nota sobre la tabla de arriba:** al quitar el desempate por id de la fusión ([ADR-0006](0006-busqueda-por-vectores.md)), la búsqueda híbrida del mini-benchmark sube de 90% a 95% de Recall@1 con embeddinggemma y de 85% a 90% con qwen. Las demás cifras no cambian al repetirlo, y la elección del modelo tampoco.

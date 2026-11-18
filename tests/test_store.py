@@ -80,3 +80,15 @@ def test_upgrades_a_database_from_the_previous_schema(db_path: Path) -> None:
     assert store.embedding_spaces(conn) == []
     assert [tuple(row) for row in conn.execute("SELECT id FROM workspaces")] == [("test",)]
     conn.close()
+
+
+def test_text_search_scans_the_fts_index_first(conn: sqlite3.Connection) -> None:
+    """Si SQLite recorre `memories` por fuera, ejecuta la búsqueda de texto una vez por fila
+    (coste cuadrático). El plan debe empezar por el índice FTS."""
+    captured: list[str] = []
+    conn.set_trace_callback(captured.append)
+    store.fts_search(conn, "test", '"ana"', limit=5, at_ms=0, kind=Kind.FACT, exclude_id="x")
+    conn.set_trace_callback(None)
+    query = next(sql for sql in captured if "memories_fts MATCH" in sql)
+    plan = [row[3] for row in conn.execute("EXPLAIN QUERY PLAN " + query)]
+    assert plan[0].startswith("SCAN memories_fts"), plan

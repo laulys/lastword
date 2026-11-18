@@ -1,6 +1,6 @@
 # Vigente — Arquitectura
 
-Estado: **aprobada** (18-11-2026). Hitos 1, 2 y 3 implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
+Estado: **aprobada** (18-11-2026). Hitos 1 a 4 implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
 
 ## 1. Resumen
 
@@ -156,17 +156,17 @@ CREATE VIRTUAL TABLE vec_1 USING vec0(
 ## 6. Recuperación
 
 1. **Saneamiento de la consulta FTS.** El texto del usuario no va directo a `MATCH`, porque comillas, `*`, `NEAR` o `-` romperían la sintaxis o cambiarían su significado. Se tokeniza y cada token se cita: `"token1" OR "token2"`. Se quitan palabras vacías (lista mínima en español e inglés) salvo que no quede ninguna otra. El ranking lo da BM25.
-2. **FTS:** `memories_fts` unida a `memories` con los filtros de workspace, vigencia o `as_of`, y `kind`. Se piden `max(k × 4, 20)` candidatos, con un máximo de 200.
+2. **FTS:** `memories_fts` unida a `memories` con los filtros de workspace, vigencia o `as_of`, y `kind`. *(Hito 4)* La unión es un `CROSS JOIN` para obligar a SQLite a recorrer primero el índice FTS. Con un `JOIN` normal, el planificador elegía recorrer `memories` por su índice y ejecutar la búsqueda de texto una vez por fila, con coste cuadrático: 432 ms con 2.000 memorias frente a 1,9 ms después, con los mismos resultados. Lo encontró el benchmark de escala, y un test comprueba el plan de la consulta. Se piden `max(k × 4, 20)` candidatos, con un máximo de 200.
 3. **Vector:** se calcula el embedding de la consulta con el formato de pregunta del modelo y se hace KNN en el `vec_N` activo con los mismos filtros dentro del KNN. Mismo número de candidatos.
-4. **Fusión RRF:** `score(d) = Σ 1 / (60 + rank_i(d))`. Solo usa posiciones, así que no hace falta normalizar BM25 y coseno, que están en escalas incomparables. Se ordena y se corta en `k`.
-5. **Modos:** sin `Embedder` configurado, el modo es `fts_only`. *(Hito 2)* Si el servicio de embeddings falla, también: la respuesta lleva un aviso en `warnings` y nada falla. Al guardar, la memoria se guarda sin vector y `vigente reindex` lo completa después.
+4. **Fusión RRF** (solo en modo híbrido): `score(d) = Σ 1 / (60 + rank_i(d))`. Solo usa posiciones, así que no hace falta normalizar BM25 y coseno, que están en escalas incomparables. Se ordena y se corta en `k`. *(Hito 4)* En los empates tienen prioridad los vectores. No se desempata por id: los ULID tienen una parte aleatoria, y los resultados cambiaban entre ejecuciones.
+5. **Modos:** *(Hito 4)* por defecto **solo vectores** ([ADR-0006](decisions/0006-busqueda-por-vectores.md)); `VIGENTE_SEARCH_MODE=hybrid|text` cambia el modo. Si alguna memoria no tiene vector (se guardó con el servicio caído, o es de otro modelo), la búsqueda por vectores no la vería, así que se combina con la de texto y se avisa hasta que se ejecute `reindex`. Comprobarlo cuesta 6 ms con 50.000 memorias. Sin `Embedder` configurado, el modo es `fts_only`. *(Hito 2)* Si el servicio de embeddings falla, también: la respuesta lleva un aviso en `warnings` y nada falla. Al guardar, la memoria se guarda sin vector y `vigente reindex` lo completa después.
 6. **`include_history=true`** quita el filtro de vigencia y marca cada resultado con su `status`.
 
 Cada resultado devuelve la memoria completa, `score`, `matched_by` (`["fts"]`, `["vector"]` o ambos) y `similarity` (coseno) si la encontró la búsqueda vectorial.
 
 *(Hito 2)* Lo que midió el mini-benchmark ([resultados](../eval/results/embedding_choice.md), [ADR-0004](decisions/0004-modelo-de-embeddings.md)):
 
-- **Solo vectores superó a la búsqueda híbrida** en ese conjunto (Recall@1 100% frente a 90% con embeddinggemma). Pero las preguntas se escribieron a propósito sin palabras en común con la respuesta y no incluyen coincidencias exactas (números, nombres raros, identificadores), que es donde BM25 aporta. Se mantiene la fusión híbrida y se decide en el Hito 4 con datos más representativos, probando también RRF con pesos.
+- **Solo vectores superó a la búsqueda híbrida** en ese conjunto (Recall@1 100% frente a 90% con embeddinggemma). Pero las preguntas se escribieron a propósito sin palabras en común con la respuesta y no incluyen coincidencias exactas (números, nombres raros, identificadores), que es donde BM25 aporta. Se mantuvo la fusión híbrida hasta decidirlo en el Hito 4 con datos más representativos. *(Hito 4)* Con E1 y LongMemEval, solo vectores ganó también, y pasó a ser el modo por defecto (ADR-0006).
 - **No hay un umbral de similitud que separe** las preguntas con respuesta de las que no tienen. Por eso `min_recall_similarity` queda en 0 y la búsqueda siempre devuelve los vecinos más cercanos, aunque no tengan relación. Decidir que «no hay nada guardado sobre esto» le corresponde al agente.
 
 ## 7. Contratos MCP
@@ -213,6 +213,15 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 
 **Experimento central:** memoria ingenua (todo queda `active`) frente a memoria con reemplazos, con la misma recuperación. La tesis se sostiene si la tasa de resultados obsoletos baja y Recall@5 no empeora.
 
+*(Hito 4)* **Ejecutado.** El protocolo definitivo, con las reglas fijadas antes de medir, está en [`eval/README.md`](../eval/README.md). Los resultados:
+
+- **E1:** la tesis se sostiene. Con la memoria ingenua, el primer resultado es una versión obsoleta en el 51% de las preguntas con búsqueda por vectores, el 44% con la híbrida y el 33% solo con texto; con Vigente, en el 0%. Recall@5 no empeora, sino que sube a 100%.
+- **E2 (LongMemEval):** sin reemplazos, en las preguntas de actualización la versión vieja sale antes que la nueva en torno a la mitad de las veces.
+- **Decisiones:** búsqueda por vectores por defecto, y el umbral se mantiene en 0.51 ([decisiones](../eval/results/decisions.md)).
+- **Escala:** [medida](../eval/results/scale.md) hasta 50.000 memorias.
+
+Lo que sigue de esta sección es el plan original.
+
 ### E1. Sintético (en el repo, semilla fija, en español)
 
 - **Datos:** entidades con atributos que cambian 1–4 veces (ciudad de una persona, base de datos de un proyecto, responsable de un módulo, preferencias), más distractores.
@@ -236,7 +245,7 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 
 1. **`forget` borra la cadena completa**, no solo una versión.
 2. **Los `episode` son inmutables** y no se pueden reemplazar.
-3. **E2b (agente simulado con qwen3:8b)** queda como opcional para el Hito 4.
+3. **E2b (agente simulado con qwen3:8b)** queda como opcional para el Hito 4. *(Hito 4)* Se dejó fuera: llevaría horas de cómputo y mediría sobre todo al modelo local. El protocolo con un agente real ya está demostrado en la demo del Hito 3.
 4. **Modelo de embeddings:** se compararon `qwen3-embedding:0.6b` y `embeddinggemma` con un mini-benchmark propio. Elegido: **embeddinggemma** ([ADR-0004](decisions/0004-modelo-de-embeddings.md)). *(Hito 2)*
 5. **Nombre «vigente».**
 6. **Git:** propongo `git init` al empezar el Hito 1 y un commit por hito, con tu autorización en cada uno.
@@ -251,9 +260,11 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 | Sintaxis FTS5 en consultas del usuario | Tokenizar y citar cada token |
 | Mezcla de español e inglés | `unicode61` sin stemming; modelo de embeddings multilingüe |
 | El agente puede no llamar a `supersede` | Descripciones claras de las herramientas; se mide en E2b; se documenta como limitación |
-| KNN de sqlite-vec es exacto (fuerza bruta) | Suficiente para la escala objetivo; se mide en el Hito 4 sin suponer cifras |
+| KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crece de forma lineal. `recall` tarda 1,5 ms con 1.000 memorias, 13 ms con 10.000 y 62 ms con 50.000, sin contar el modelo; la base ocupa 191 MB con 50.000. Para cientos de miles habría que pasar a vectores cuantizados o a un índice aproximado ([escala](../eval/results/scale.md)) |
 | CLI y servidor MCP sobre el mismo archivo | WAL + `busy_timeout` |
 | Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `vigente reindex` completa lo pendiente |
 | Enviar memorias a un servicio remoto sin querer *(Hito 2)* | Toda URL no local se rechaza salvo con `VIGENTE_ALLOW_REMOTE=1`; la clave de API solo llega por entorno |
-| Umbral de reemplazos frágil *(Hito 2)* | Calibrado con solo 18 casos y margen estrecho (ADR-0004); se recalibra en el Hito 4 con más datos |
+| Umbral de reemplazos frágil *(Hito 2)* | Calibrado con solo 18 casos y margen estrecho (ADR-0004). *(Hito 4)* Recalibrado con E1 y validado aparte: se mantiene 0.51, porque el umbral calibrado con plantillas no generalizaba |
+| Rendimiento que solo se ve con muchos datos *(Hito 4)* | El benchmark de escala encontró una búsqueda de texto con coste cuadrático (§6); un test comprueba el plan de la consulta |
+| Resultados de evaluación no reproducibles *(Hito 4)* | El desempate de RRF dependía de ids aleatorios; corregido, y las evaluaciones se ejecutaron dos veces con resultados idénticos |
 | Vecinos sin relación en los resultados *(Hito 2)* | Ningún umbral los separa en los datos actuales; se documenta y lo decide el agente |
