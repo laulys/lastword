@@ -10,14 +10,18 @@ Reglas:
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from vigente.errors import SchemaVersionError
+import sqlite_vec
+
+from vigente.errors import ConfigError, SchemaVersionError
 from vigente.models import Kind, Memory, Status
 
 OPEN_END_MS = 253_402_300_799_999  # 9999-12-31T23:59:59.999Z
@@ -64,6 +68,18 @@ _MIGRATIONS: tuple[str, ...] = (
         tokenize = 'unicode61 remove_diacritics 2'
     );
     """,
+    # v2: registro de espacios vectoriales. La tabla vec0 de cada espacio se crea al guardar
+    # su primer vector, porque su dimensión depende del modelo (ver ensure_embedding_space).
+    """
+    CREATE TABLE embedding_spaces (
+        id         INTEGER PRIMARY KEY,
+        model      TEXT NOT NULL,
+        dim        INTEGER NOT NULL CHECK (dim BETWEEN 1 AND 8192),
+        table_name TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL,
+        UNIQUE (model, dim)
+    );
+    """,
 )
 LATEST_SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -104,6 +120,19 @@ def from_ms(ms: int) -> datetime:
 # --- conexión, transacciones y migraciones
 
 
+def _load_sqlite_vec(conn: sqlite3.Connection) -> None:
+    if not hasattr(conn, "enable_load_extension"):
+        raise ConfigError(
+            "Este Python no permite cargar extensiones de SQLite y Vigente necesita sqlite-vec. "
+            "Usa un Python gestionado por uv."
+        )
+    conn.enable_load_extension(True)
+    try:
+        sqlite_vec.load(conn)
+    finally:
+        conn.enable_load_extension(False)
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
     in_memory = str(path) == ":memory:"
     target = ":memory:" if in_memory else Path(path).expanduser()
@@ -111,13 +140,14 @@ def connect(path: str | Path) -> sqlite3.Connection:
         target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target, autocommit=True)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    conn.execute("PRAGMA secure_delete = ON")  # lo borrado se sobrescribe con ceros
-    if not in_memory:
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
     try:
+        _load_sqlite_vec(conn)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA secure_delete = ON")  # lo borrado se sobrescribe con ceros
+        if not in_memory:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
         migrate(conn)
     except BaseException:
         conn.close()
@@ -177,7 +207,8 @@ def ensure_workspace(conn: sqlite3.Connection, workspace_id: str, created_ms: in
     )
 
 
-def insert_memory(conn: sqlite3.Connection, memory: Memory) -> None:
+def insert_memory(conn: sqlite3.Connection, memory: Memory) -> int:
+    """Inserta la fila y su entrada FTS. Devuelve `seq`, que enlaza los índices."""
     cursor = conn.execute(
         f"INSERT INTO memories ({_COLUMNS}) VALUES ({_PLACEHOLDERS})",
         (
@@ -190,7 +221,7 @@ def insert_memory(conn: sqlite3.Connection, memory: Memory) -> None:
             memory.confidence,
             to_ms(memory.created_at),
             to_ms(memory.valid_from),
-            OPEN_END_MS if memory.valid_to is None else to_ms(memory.valid_to),
+            _valid_to_ms(memory),
             memory.status.value,
             memory.supersedes_id,
             memory.superseded_by_id,
@@ -198,10 +229,14 @@ def insert_memory(conn: sqlite3.Connection, memory: Memory) -> None:
             memory.embedding_model,
         ),
     )
+    seq = cursor.lastrowid
+    if seq is None:
+        raise RuntimeError("SQLite no devolvió el número de fila de la memoria")
     conn.execute(
         "INSERT INTO memories_fts (rowid, content, tags) VALUES (?, ?, ?)",
-        (cursor.lastrowid, memory.content, " ".join(memory.tags)),
+        (seq, memory.content, " ".join(memory.tags)),
     )
+    return seq
 
 
 def mark_superseded(
@@ -212,16 +247,23 @@ def mark_superseded(
     valid_to: datetime,
     superseded_by_id: str,
 ) -> None:
-    cursor = conn.execute(
+    rows = conn.execute(
         """
         UPDATE memories
         SET valid_to = ?, status = 'superseded', superseded_by_id = ?
         WHERE workspace_id = ? AND id = ? AND superseded_by_id IS NULL
+        RETURNING seq
         """,
         (to_ms(valid_to), superseded_by_id, workspace_id, memory_id),
-    )
-    if cursor.rowcount != 1:
+    ).fetchall()
+    if len(rows) != 1:
         raise RuntimeError(f"No se pudo cerrar la vigencia de {memory_id}")
+    # Los índices vectoriales filtran por fechas dentro del KNN: hay que mantenerlas al día.
+    for space in embedding_spaces(conn):
+        conn.execute(
+            f"UPDATE {space.table} SET valid_to = ? WHERE rowid = ?",
+            (to_ms(valid_to), rows[0][0]),
+        )
 
 
 def delete_memories(conn: sqlite3.Connection, workspace_id: str, ids: Sequence[str]) -> int:
@@ -237,6 +279,8 @@ def delete_memories(conn: sqlite3.Connection, workspace_id: str, ids: Sequence[s
         )
     ]
     conn.executemany("DELETE FROM memories_fts WHERE rowid = ?", [(seq,) for seq in seqs])
+    for space in embedding_spaces(conn):
+        conn.executemany(f"DELETE FROM {space.table} WHERE rowid = ?", [(seq,) for seq in seqs])
     cursor = conn.execute(
         f"DELETE FROM memories WHERE workspace_id = ? AND id IN ({marks})",
         (workspace_id, *ids),
@@ -360,6 +404,171 @@ def stats(conn: sqlite3.Connection, workspace_id: str) -> dict[str, int]:
     return counts
 
 
+def get_memory_by_seq(conn: sqlite3.Connection, workspace_id: str, seq: int) -> Memory | None:
+    row = conn.execute(
+        f"SELECT {_COLUMNS} FROM memories WHERE workspace_id = ? AND seq = ?",
+        (workspace_id, seq),
+    ).fetchone()
+    return None if row is None else _to_memory(row)
+
+
+def _valid_to_ms(memory: Memory) -> int:
+    return OPEN_END_MS if memory.valid_to is None else to_ms(memory.valid_to)
+
+
+# --- vectores
+
+_VECTOR_TABLE = re.compile(r"^vec_\d+$")
+MAX_DIM = 8192
+
+
+@dataclass(frozen=True)
+class EmbeddingSpace:
+    """Un índice vectorial por (modelo, dimensión): nunca se mezclan vectores incompatibles."""
+
+    id: int
+    model: str
+    dim: int
+    table: str
+
+
+def _to_space(row: sqlite3.Row) -> EmbeddingSpace:
+    table = str(row["table_name"])
+    if not _VECTOR_TABLE.match(table):  # se interpola en SQL: defensa adicional
+        raise RuntimeError(f"Nombre de tabla vectorial inesperado: {table!r}")
+    return EmbeddingSpace(
+        id=int(row["id"]), model=str(row["model"]), dim=int(row["dim"]), table=table
+    )
+
+
+def embedding_spaces(conn: sqlite3.Connection) -> list[EmbeddingSpace]:
+    rows = conn.execute("SELECT id, model, dim, table_name FROM embedding_spaces ORDER BY id")
+    return [_to_space(row) for row in rows]
+
+
+def find_embedding_space(
+    conn: sqlite3.Connection, model: str, dim: int | None = None
+) -> EmbeddingSpace | None:
+    """El espacio de un modelo (y dimensión, si se indica). Si hay varios, el más reciente."""
+    sql = "SELECT id, model, dim, table_name FROM embedding_spaces WHERE model = ?"
+    params: list[Any] = [model]
+    if dim is not None:
+        sql += " AND dim = ?"
+        params.append(dim)
+    row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", params).fetchone()
+    return None if row is None else _to_space(row)
+
+
+def ensure_embedding_space(
+    conn: sqlite3.Connection, model: str, dim: int, created_ms: int
+) -> EmbeddingSpace:
+    existing = find_embedding_space(conn, model, dim)
+    if existing is not None:
+        return existing
+    if not 1 <= dim <= MAX_DIM:
+        raise ValueError(f"Dimensión de embedding fuera de rango: {dim}")
+    space_id = _scalar(conn, "SELECT coalesce(max(id), 0) + 1 FROM embedding_spaces")
+    table = f"vec_{space_id}"
+    conn.execute(
+        "INSERT INTO embedding_spaces (id, model, dim, table_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (space_id, model, dim, table, created_ms),
+    )
+    # workspace_id como partition key y fechas/tipo como metadatos: así los filtros se
+    # aplican dentro del KNN y no hace falta sobremuestrear (comprobado en el hito 0).
+    conn.execute(
+        f"""
+        CREATE VIRTUAL TABLE {table} USING vec0(
+            workspace_id TEXT PARTITION KEY,
+            kind         TEXT,
+            valid_from   INTEGER,
+            valid_to     INTEGER,
+            embedding    FLOAT[{dim}] distance_metric=cosine
+        )
+        """
+    )
+    return EmbeddingSpace(id=space_id, model=model, dim=dim, table=table)
+
+
+def insert_vector(
+    conn: sqlite3.Connection,
+    space: EmbeddingSpace,
+    seq: int,
+    memory: Memory,
+    vector: Sequence[float],
+) -> None:
+    if len(vector) != space.dim:
+        raise ValueError(f"El vector tiene {len(vector)} dimensiones y el espacio, {space.dim}")
+    conn.execute(
+        f"INSERT INTO {space.table} (rowid, workspace_id, kind, valid_from, valid_to, embedding) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            seq,
+            memory.workspace_id,
+            memory.kind.value,
+            to_ms(memory.valid_from),
+            _valid_to_ms(memory),
+            sqlite_vec.serialize_float32(list(vector)),
+        ),
+    )
+    conn.execute("UPDATE memories SET embedding_model = ? WHERE seq = ?", (space.model, seq))
+
+
+def vector_search(
+    conn: sqlite3.Connection,
+    space: EmbeddingSpace,
+    workspace_id: str,
+    vector: Sequence[float],
+    *,
+    limit: int,
+    at_ms: int | None,
+    kind: Kind | None = None,
+) -> list[tuple[Memory, float]]:
+    """KNN con los filtros dentro de la búsqueda. Devuelve (memoria, distancia coseno)."""
+    where = ["embedding MATCH ?", "k = ?", "workspace_id = ?"]
+    params: list[Any] = [sqlite_vec.serialize_float32(list(vector)), limit, workspace_id]
+    if at_ms is not None:
+        where.append("valid_from <= ? AND valid_to > ?")
+        params += [at_ms, at_ms]
+    if kind is not None:
+        where.append("kind = ?")
+        params.append(kind.value)
+    params.append(workspace_id)
+    sql = f"""
+        WITH knn AS (SELECT rowid, distance FROM {space.table} WHERE {" AND ".join(where)})
+        SELECT {_M_COLUMNS}, knn.distance AS distance
+        FROM knn JOIN memories AS m ON m.seq = knn.rowid
+        WHERE m.workspace_id = ?
+        ORDER BY knn.distance
+    """
+    rows = conn.execute(sql, params).fetchall()
+    return [(_to_memory(row), float(row["distance"])) for row in rows]
+
+
+def memories_without_vector(
+    conn: sqlite3.Connection, workspace_id: str, space: EmbeddingSpace | None, *, limit: int
+) -> list[tuple[int, Memory]]:
+    sql = f"SELECT seq, {_COLUMNS} FROM memories WHERE workspace_id = ?"
+    if space is not None:
+        sql += f" AND seq NOT IN (SELECT rowid FROM {space.table})"
+    rows = conn.execute(sql + " ORDER BY seq LIMIT ?", (workspace_id, limit)).fetchall()
+    return [(int(row["seq"]), _to_memory(row)) for row in rows]
+
+
+def count_without_vector(
+    conn: sqlite3.Connection, workspace_id: str, space: EmbeddingSpace | None
+) -> int:
+    sql = "SELECT count(*) FROM memories WHERE workspace_id = ?"
+    if space is not None:
+        sql += f" AND seq NOT IN (SELECT rowid FROM {space.table})"
+    return int(conn.execute(sql, (workspace_id,)).fetchone()[0])
+
+
+def has_vector(conn: sqlite3.Connection, space: EmbeddingSpace, seq: int) -> bool:
+    row = conn.execute(f"SELECT 1 FROM {space.table} WHERE rowid = ?", (seq,)).fetchone()
+    return row is not None
+
+
 # --- integridad
 
 _BROKEN_CHAINS_SQL = """
@@ -407,4 +616,34 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
         problems.append(f"{missing} memorias sin entrada en el índice de texto")
     for (memory_id,) in conn.execute(_BROKEN_CHAINS_SQL, (OPEN_END_MS,)):
         problems.append(f"cadena de reemplazos inconsistente en {memory_id}")
+    for space in embedding_spaces(conn):
+        orphan_vectors = _scalar(
+            conn,
+            f"SELECT count(*) FROM {space.table} WHERE rowid NOT IN (SELECT seq FROM memories)",
+        )
+        if orphan_vectors:
+            problems.append(f"{orphan_vectors} vectores de {space.model} sin memoria")
+        stale = _scalar(
+            conn,
+            f"""
+            SELECT count(*) FROM {space.table} AS v JOIN memories AS m ON m.seq = v.rowid
+            WHERE v.workspace_id != m.workspace_id OR v.kind != m.kind
+               OR v.valid_from != m.valid_from OR v.valid_to != m.valid_to
+            """,
+        )
+        if stale:
+            problems.append(f"{stale} vectores de {space.model} con metadatos desactualizados")
+    # `memories.embedding_model` es el modelo del último vector calculado. Si dice que hay
+    # vector de un modelo, tiene que existir en el espacio más reciente de ese modelo.
+    latest = {space.model: space for space in embedding_spaces(conn)}
+    for space in latest.values():
+        (claimed,) = conn.execute(
+            f"SELECT count(*) FROM memories WHERE embedding_model = ? "
+            f"AND seq NOT IN (SELECT rowid FROM {space.table})",
+            (space.model,),
+        ).fetchone()
+        if claimed:
+            problems.append(
+                f"{claimed} memorias dicen tener vector de {space.model} y no lo tienen"
+            )
     return problems

@@ -67,3 +67,16 @@ def test_other_timezones_are_converted_to_utc() -> None:
 def test_naive_datetimes_are_a_bug() -> None:
     with pytest.raises(TypeError):
         store.to_ms(datetime(2026, 3, 1))
+
+
+def test_upgrades_a_database_from_the_previous_schema(db_path: Path) -> None:
+    old = sqlite3.connect(db_path, autocommit=True)
+    old.executescript(store._MIGRATIONS[0])
+    old.execute("PRAGMA user_version = 1")
+    old.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
+    old.close()
+    conn = store.connect(db_path)
+    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 2
+    assert store.embedding_spaces(conn) == []
+    assert [tuple(row) for row in conn.execute("SELECT id FROM workspaces")] == [("test",)]
+    conn.close()

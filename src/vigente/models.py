@@ -121,30 +121,40 @@ class Memory(BaseModel):
     supersedes_id: str | None = None
     superseded_by_id: str | None = None
     supersede_reason: str | None = None  # por qué esta versión reemplazó a la anterior
-    embedding_model: str | None = None
+    embedding_model: str | None = None  # modelo del último vector calculado; None = sin vector
 
 
 class Hit(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     memory: Memory
-    score: float  # relevancia para esta consulta (mayor = mejor)
-    matched_by: list[str]
+    score: float  # relevancia para esta consulta (mayor = mejor; no comparable entre consultas)
+    matched_by: list[str]  # "fts", "vector" o ambos
+    similarity: float | None = None  # similitud coseno, si la encontró la búsqueda vectorial
 
 
 class RememberResult(BaseModel):
     memory: Memory
     possible_supersedes: list[Hit]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SupersedeResult(BaseModel):
     new: Memory
     old: Memory
+    warnings: list[str] = Field(default_factory=list)
 
 
 class RecallResult(BaseModel):
     mode: Literal["fts_only", "hybrid"]
     results: list[Hit]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ReindexResult(BaseModel):
+    model: str
+    dim: int | None
+    embedded: int
 
 
 class Page(BaseModel):
