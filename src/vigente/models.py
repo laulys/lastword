@@ -5,6 +5,7 @@ Toda entrada externa (CLI, MCP) se valida con estos modelos antes de llegar a SQ
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Literal, Self
@@ -12,6 +13,7 @@ from typing import Annotated, Literal, Self
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StringConstraints,
@@ -48,14 +50,33 @@ class Status(StrEnum):
     SUPERSEDED = "superseded"  # otra memoria la reemplazó
 
 
+MAX_YEAR = 9998  # el final de 9999 es la marca de «sin fecha de fin» en la base de datos
+_NUMBER = re.compile(r"[+-]?\d+(?:\.\d+)?")
+
+
+def _only_iso(value: object) -> object:
+    """Pydantic lee un número, también escrito como texto, como segundos desde 1970: «2024»
+    acabaría siendo el 1 de enero de 1970. Una fecha se escribe en ISO 8601."""
+    is_number = isinstance(value, int | float) or (
+        isinstance(value, str) and _NUMBER.fullmatch(value.strip()) is not None
+    )
+    if is_number:
+        raise ValueError(tr("escribe la fecha en formato ISO 8601, por ejemplo 2026-03-01"))
+    return value
+
+
 def _as_utc(value: datetime) -> datetime:
     """Las fechas sin zona horaria se interpretan como UTC."""
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+    try:
+        utc = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    except OverflowError:
+        raise ValueError(tr("fecha fuera de rango")) from None
+    if utc.year > MAX_YEAR:
+        raise ValueError(tr("fecha fuera de rango"))
+    return utc
 
 
-UtcDatetime = Annotated[datetime, AfterValidator(_as_utc)]
+UtcDatetime = Annotated[datetime, BeforeValidator(_only_iso), AfterValidator(_as_utc)]
 WorkspaceId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")]
 # Pydantic comprueba `pattern` antes de `to_upper`, así que el patrón acepta minúsculas
 # y la conversión se hace después, de forma explícita.

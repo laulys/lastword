@@ -122,6 +122,8 @@ EN: dict[str, str] = {
     "con new_id, la vigencia y los demás datos son los de esa memoria": "with new_id, the validity and the other data are those of that memory",
     "old_id y also_old_ids no pueden repetir hechos": "old_id and also_old_ids cannot repeat facts",
     "include_history y as_of no se pueden combinar": "include_history and as_of cannot be combined",
+    "escribe la fecha en formato ISO 8601, por ejemplo 2026-03-01": "write the date in ISO 8601 format, for example 2026-03-01",
+    "fecha fuera de rango": "date out of range",
     "entrada": "input",
     "{env} necesita al menos {n} caracteres": "{env} needs at least {n} characters",
     "Servidor MCP de Vigente. Por defecto, por stdio.": "Vigente's MCP server. By default, over stdio.",
