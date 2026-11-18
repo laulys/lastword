@@ -203,7 +203,12 @@ class MemoryService:
             return self._superseded(new.id, olds, warnings)
 
     def _link(self, old_ids: list[str], new_id: str, reason: str | None) -> SupersedeResult:
-        """Enlaza una memoria ya guardada como versión nueva de otras, sin duplicar el hecho."""
+        """Enlaza una memoria ya guardada como versión nueva de otras, sin duplicar el hecho.
+
+        Si ya era la versión nueva de otro hecho, se le suman estos: así se puede completar
+        después un reemplazo («también dejó obsoleto esto otro»). Su hecho principal y su
+        motivo no cambian.
+        """
         with store.transaction(self._conn):
             olds = [self._require(old_id) for old_id in old_ids]
             new = self._require(new_id)
@@ -211,19 +216,16 @@ class MemoryService:
                 self._check_supersedable(old)
             if new.kind is not Kind.FACT:
                 raise NotSupersedableError(tr("La versión nueva tiene que ser un fact."))
-            if new.supersedes_id is not None:
-                raise NotSupersedableError(
-                    tr("{new} ya es la versión nueva de {old}.", new=new.id, old=new.supersedes_id)
-                )
             connected = {memory.id for memory in self._lineage(new)}
             if any(old.id in connected for old in olds):
                 raise NotSupersedableError(
                     tr("Ese enlace crearía un ciclo en la cadena de versiones.")
                 )
             _check_starts_after(new.valid_from, max(old.valid_from for old in olds))
-            store.set_supersedes(
-                self._conn, self.workspace_id, new.id, supersedes_id=olds[0].id, reason=reason
-            )
+            if new.supersedes_id is None:
+                store.set_supersedes(
+                    self._conn, self.workspace_id, new.id, supersedes_id=olds[0].id, reason=reason
+                )
             self._close(olds, new.id, new.valid_from)
             return self._superseded(new.id, olds)
 

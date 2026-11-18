@@ -117,6 +117,21 @@ def test_the_same_fact_cannot_be_listed_twice(two_cities: tuple[Memory, Memory])
         SupersedeRequest(old_id=ana.id, also_old_ids=[ana.id], new_content="Ana vive en Lisboa")
 
 
+def test_another_fact_can_be_added_later_to_the_same_replacement(
+    service: MemoryService, clock: FakeClock, two_cities: tuple[Memory, Memory]
+) -> None:
+    """«Ah, y eso también dejó obsoleto lo de Luis»: se enlaza después, sin duplicar nada."""
+    ana, luis = two_cities
+    merged = supersede(service, ana.id, "Ana y Luis viven en Lisboa", reason="mudanza")
+    clock.advance(days=1)
+    result = service.supersede(SupersedeRequest(old_id=luis.id, new_id=merged.id))
+    assert (result.new.supersedes_id, result.new.supersede_reason) == (ana.id, "mudanza")
+    assert result.old.superseded_by_id == merged.id
+    assert result.old.valid_to == merged.valid_from
+    assert [m.id for m in service.history(luis.id)] == [ana.id, luis.id, merged.id]
+    assert service.doctor() == []
+
+
 def test_a_fact_with_thousands_of_versions_can_still_be_read_and_forgotten(
     service: MemoryService, conn: sqlite3.Connection
 ) -> None:

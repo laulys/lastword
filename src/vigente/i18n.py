@@ -154,7 +154,6 @@ EN: dict[str, str] = {
     "Solo los fact se pueden reemplazar; un episode registra algo que ya pasó.": "Only facts can be superseded; an episode records something that already happened.",
     "{old} ya fue reemplazada; la versión vigente es {current}.": "{old} was already superseded; the current version is {current}.",
     "La versión nueva tiene que ser un fact.": "The new version has to be a fact.",
-    "{new} ya es la versión nueva de {old}.": "{new} is already the new version of {old}.",
     "Ese enlace crearía un ciclo en la cadena de versiones.": "That link would create a cycle in the version chain.",
     "Borrado: ya no se puede leer ni buscar. Otra conexión está usando la base, así que el texto sigue en el archivo de registro (-wal) hasta que se cierre.": "Deleted: it can no longer be read or searched. Another connection is using the database, so the text stays in the log file (-wal) until it closes.",
     "No hay vectores de {model} ({dim} dimensiones). Ejecuta `vigente reindex`. Se usó solo la búsqueda de texto.": "There are no {model} vectors ({dim} dimensions). Run `vigente reindex`. Only text search was used.",

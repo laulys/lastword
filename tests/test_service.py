@@ -338,7 +338,7 @@ class TestLink:
         cases: list[tuple[str, str, type[Exception]]] = [
             (v2.id, episode.id, NotSupersedableError),  # la versión nueva debe ser un fact
             (other.id, other.id, NotSupersedableError),  # consigo misma
-            (other.id, v2.id, NotSupersedableError),  # v2 ya es la versión nueva de v1
+            (other.id, v2.id, InvalidValidityError),  # v2 empezó antes que el hecho a cerrar
             (v2.id, v1.id, NotSupersedableError),  # ciclo: v1 → v2 → v1
             (v1.id, other.id, AlreadySupersededError),  # v1 ya fue reemplazada
         ]
