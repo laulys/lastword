@@ -1,8 +1,12 @@
-"""Latencia y escala: ¿hasta dónde llega un solo archivo SQLite con KNN exacto?
+"""Latencia y escala: ¿hasta dónde llega un solo archivo SQLite?
 
 Usa vectores aleatorios de 768 dimensiones (las de embeddinggemma) para medir el coste de
 Vigente sin mezclarlo con el del modelo, que se mide aparte (eval/embedding_choice.py y la
 caché de E2). Las bases van a un directorio temporal, en disco, con WAL, como en uso real.
+
+Todas las memorias son hechos. Es el peor caso para guardar: cada hecho nuevo se compara con
+todos los vigentes para proponer reemplazos. (Hasta la v1.2.1 la base se llenaba de episodios,
+con los que un hecho no se compara, y la latencia de guardar salía mejor de lo que es.)
 
 Uso:
     uv run python eval/scale.py [--sizes 1000 10000 50000]
@@ -14,6 +18,7 @@ import argparse
 import hashlib
 import platform
 import random
+import sqlite3
 import tempfile
 import time
 from collections.abc import Callable, Sequence
@@ -23,8 +28,10 @@ from pathlib import Path
 from charts import bar_chart
 from metrics import percentile
 
+from vigente import store
 from vigente.embeddings import ModelProfile, Purpose
-from vigente.models import Kind, ListQuery, NewMemory, RecallQuery
+from vigente.ids import new_ulid
+from vigente.models import Kind, ListQuery, Memory, NewMemory, RecallQuery
 from vigente.service import MemoryService
 
 HERE = Path(__file__).parent
@@ -32,6 +39,8 @@ RESULTS_MD = HERE / "results" / "scale.md"
 CHART = HERE / "results" / "scale.svg"
 DIM = 768
 RECALLS, REMEMBERS, FORGETS = 50, 30, 10
+LOAD_BATCH = 1000
+T0 = datetime(2026, 1, 1, tzinfo=UTC)
 WORDS = (  # noqa: SIM905 - más legible que 35 cadenas sueltas
     "proyecto base datos reunión equipo cliente viaje receta libro película música salud plan "
     "presupuesto fin semana ciudad amigo trabajo correo código lanzamiento diseño factura "
@@ -67,13 +76,34 @@ def timed(action: Callable[[int], object], times: int) -> list[float]:
     return samples
 
 
+def load(conn: sqlite3.Connection, embedder: RandomEmbedder, rng: random.Random, size: int) -> None:
+    """Llena la base de hechos escribiendo en el almacén, sin pasar por `remember`: guardar
+    200.000 hechos uno a uno tardaría cerca de una hora, porque cada uno busca reemplazos entre
+    todos los anteriores. Lo que se mide después sí pasa por el servicio."""
+    space = store.ensure_embedding_space(conn, embedder.model, DIM, store.to_ms(T0))
+    for first in range(0, size, LOAD_BATCH):
+        texts = [sentence(rng, number) for number in range(first, min(first + LOAD_BATCH, size))]
+        vectors = embedder.embed(texts, "document")
+        with store.transaction(conn):
+            for text, vector in zip(texts, vectors, strict=True):
+                memory = Memory(
+                    id=new_ulid(store.to_ms(T0)),
+                    workspace_id="escala",
+                    kind=Kind.FACT,
+                    content=text,
+                    tags=[],
+                    created_at=T0,
+                    valid_from=T0,
+                )
+                store.insert_vector(conn, space, store.insert_memory(conn, memory), memory, vector)
+
+
 def measure(size: int, workdir: Path) -> dict[str, float]:
     rng = random.Random(size)
-    service = MemoryService.open(workdir / f"scale-{size}.db", "escala", embedder=RandomEmbedder())
-    start = time.perf_counter()
-    for number in range(size):
-        service.remember(NewMemory(content=sentence(rng, number), kind=Kind.EPISODE))
-    load_ms = (time.perf_counter() - start) / size * 1000
+    embedder = RandomEmbedder()
+    conn = store.connect(workdir / f"scale-{size}.db")
+    service = MemoryService(conn, "escala", embedder=embedder)
+    load(conn, embedder, rng, size)
 
     queries = [" ".join(rng.choices(WORDS, k=6)) for _ in range(RECALLS)]
     recall = timed(lambda i: service.recall(RecallQuery(query=queries[i])), RECALLS)
@@ -85,7 +115,6 @@ def measure(size: int, workdir: Path) -> dict[str, float]:
     service.close()
     size_mb = sum(p.stat().st_size for p in workdir.glob(f"scale-{size}.db*")) / 1e6
     return {
-        "load_ms": load_ms,
         "recall_p50": percentile(recall, 50),
         "recall_p95": percentile(recall, 95),
         "remember_p50": percentile(remember, 50),
@@ -128,26 +157,25 @@ def main() -> None:
         f"Python {platform.python_version()}",
         f"- Repeticiones por tamaño: {RECALLS} búsquedas, {REMEMBERS} escrituras de hechos "
         f"(con detección de posibles reemplazos), {FORGETS} borrados.",
+        "- Todas las memorias son hechos: es el peor caso para guardar, porque cada hecho nuevo "
+        "se compara con todos los vigentes.",
         "",
-        "| Memorias | recall p50 / p95 | remember p50 / p95 | forget p50 / p95 | "
-        "Carga por memoria | Tamaño en disco |",
-        "|---:|---:|---:|---:|---:|---:|",
+        "| Memorias | recall p50 / p95 | remember p50 / p95 | forget p50 / p95 | Tamaño en disco |",
+        "|---:|---:|---:|---:|---:|",
     ]
     for size, label in zip(sizes, labels, strict=True):
         r = results[size]
         lines.append(
             f"| {label} | {r['recall_p50']:.1f} / {r['recall_p95']:.1f} ms | "
             f"{r['remember_p50']:.1f} / {r['remember_p95']:.1f} ms | "
-            f"{r['forget_p50']:.1f} / {r['forget_p95']:.1f} ms | {r['load_ms']:.2f} ms | "
-            f"{r['size_mb']:.0f} MB |"
+            f"{r['forget_p50']:.1f} / {r['forget_p95']:.1f} ms | {r['size_mb']:.0f} MB |"
         )
     lines += [
         "",
         "![Latencia según el número de memorias](scale.svg)",
         "",
-        "A esto hay que sumar el modelo de embeddings: una consulta con embeddinggemma en "
-        "Ollama tarda unos 15 ms (p50, [elección del modelo](embedding_choice.md)), y en lote "
-        "procesa unos 65 textos por segundo en esta máquina.",
+        "A esto hay que sumar el modelo de embeddings, que se mide aparte: la latencia de una "
+        "consulta con embeddinggemma en Ollama está en [elección del modelo](embedding_choice.md).",
     ]
     text = "\n".join(lines) + "\n"
     RESULTS_MD.write_text(text, encoding="utf-8")
