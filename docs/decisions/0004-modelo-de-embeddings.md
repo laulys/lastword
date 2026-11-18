@@ -53,3 +53,17 @@ El umbral se volvió a calibrar con E1, el experimento sintético ([resultados](
 - **Decisión: se mantiene 0.51.** Las frases de E1 salen de plantillas («Ana vive en…», «Ana trabaja en…») y se parecen entre sí más que las reales. Calibrar con ellas habría sobreajustado el umbral a las plantillas. La regla fijada de antemano lo evitó.
 - **Coste conocido:** con 0.51, en E1 la precisión de las propuestas es solo del 22%. Son sugerencias de más que el agente tiene que descartar, sobre todo otros datos de la misma persona o proyecto.
 - **Nota sobre la tabla de arriba:** al quitar el desempate por id de la fusión ([ADR-0006](0006-busqueda-por-vectores.md)), la búsqueda híbrida del mini-benchmark sube de 90% a 95% de Recall@1 con embeddinggemma y de 85% a 90% con qwen. Las demás cifras no cambian al repetirlo, y la elección del modelo tampoco.
+
+## Revisión en la v1.2: ¿se puede separar «actualiza» de «añade»?
+
+El README tenía como limitación que las frases del mismo tema también reciben propuestas. Se probó una idea sin LLM: una actualización cambia el valor de un mismo atributo («Ana vive en Madrid» → «Ana se mudó a Lisboa»), y una frase del mismo tema cambia de atributo («Ana trabaja como diseñadora»). Si se tapan los valores (nombres propios y cifras) antes de comparar, la similitud debería medir sobre todo el atributo.
+
+Resultado, con el conjunto escrito a mano y el mejor umbral de cada variante ([script](../../eval/masked_similarity.py), [resultados](../../eval/results/masked_similarity.md)):
+
+| Similitud | F2 | Recall | Frases del mismo tema con propuesta |
+|---|---:|---:|---:|
+| completa (la actual, 0.51) | **0.859** | 94% | 10 de 10 |
+| con los valores tapados | 0.750 | 83% | 7 de 10 |
+| media de las dos | 0.842 | 94% | 9 de 10 |
+
+Tapar los valores gana algo de precisión, pero pierde actualizaciones verdaderas, que es lo que más cuesta: un reemplazo perdido deja un dato obsoleto vigente. **Se mantiene la similitud completa.** Con similitud no se puede distinguir «actualiza» de «añade»: por eso decide el agente (ADR-0003), que lee las dos frases y descarta las propuestas que sobran.
