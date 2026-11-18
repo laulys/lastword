@@ -25,6 +25,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from vigente.errors import HiddenCharactersError, SecretDetectedError
+from vigente.i18n import tr
 
 
 @dataclass(frozen=True)
@@ -333,7 +334,17 @@ _BLOCKING_HIDDEN = {"hidden:tags", "hidden:bidi"}
 
 
 def describe(code: str) -> str:
-    return _LABELS.get(code, code)
+    """El motivo de una marca, en el idioma de quien lee."""
+    return tr(_LABELS[code]) if code in _LABELS else code
+
+
+def labels() -> list[str]:
+    """Todas las etiquetas, en español: el test de idiomas comprueba que tienen traducción."""
+    return list(_LABELS.values())
+
+
+def _enumerate(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + tr(" y ") + items[-1]
 
 
 def _unique(findings: Iterable[Finding]) -> list[Finding]:
@@ -353,19 +364,22 @@ def check_before_saving(texts: Iterable[str | None], *, allow_secrets: bool = Fa
     hidden = _unique(f for text in present for f in find_hidden(text) if f.code in _BLOCKING_HIDDEN)
     if hidden:
         raise HiddenCharactersError(
-            "No se guardó: el texto contiene "
-            + " y ".join(f.label for f in hidden)
-            + ", que pueden esconder instrucciones. Quítalos y vuelve a intentarlo."
+            tr(
+                "No se guardó: el texto contiene {what}, que pueden esconder instrucciones. "
+                "Quítalos y vuelve a intentarlo.",
+                what=_enumerate([describe(f.code) for f in hidden]),
+            )
         )
     if allow_secrets:
         return
     secrets = _unique(f for text in present for f in find_secrets(text))
     if secrets:
         raise SecretDetectedError(
-            "No se guardó: parece contener "
-            + ", ".join(f.label for f in secrets)
-            + ". Guarda dónde está el secreto (por ejemplo, «la clave de Stripe está en el "
-            "gestor de contraseñas»), no el secreto."
+            tr(
+                "No se guardó: parece contener {what}. Guarda dónde está el secreto (por ejemplo, "
+                "«la clave de Stripe está en el gestor de contraseñas»), no el secreto.",
+                what=_enumerate([describe(f.code) for f in secrets]),
+            )
         )
 
 

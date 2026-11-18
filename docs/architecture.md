@@ -44,7 +44,7 @@ Los puntos 4 y 5 determinan reglas del diseño (ver §4 y ADR-0001).
            ┌──────▼──────┐
            │  store.py   │                       SQL, migraciones, conexión
            └─────────────┘
-   models.py y config.py: compartidos por todos
+   models.py, config.py e i18n.py: compartidos por todos
 ```
 
 - Las dependencias van en un solo sentido, de arriba abajo.
@@ -53,6 +53,7 @@ Los puntos 4 y 5 determinan reglas del diseño (ver §4 y ADR-0001).
 - `Embedder` es la única interfaz abstracta. Tiene dos implementaciones reales: la compatible con OpenAI y `FakeEmbedder` para tests.
 - *(Hito 2)* Cada familia de modelos tiene un `ModelProfile`: el formato de entrada que espera según el uso (documento guardado, pregunta, comparación) y sus umbrales calibrados. Si no se respeta el formato, la calidad cae sin dar ningún error.
 - *(Hito 2)* Los embeddings se calculan **fuera** de las transacciones: son llamadas de red y no deben bloquear la base de datos.
+- *(v1.2)* Lo que lee una persona (la CLI, los errores, los avisos y `vigente doctor`) pasa por `tr()` de `i18n.py`: el texto fuente está en español y hay un catálogo en inglés. El idioma sale de `VIGENTE_LANG` o del sistema. Lo que lee el agente (instrucciones y descripciones MCP) se queda en español. Un test comprueba que cada texto tiene traducción con los mismos huecos.
 
 ## 4. Esquema SQL
 
@@ -142,8 +143,9 @@ CREATE VIRTUAL TABLE vec_1 USING vec0(
 - **Solo se reemplazan `fact`.** Los `episode` («el 3 de mayo decidimos X») son registros de algo que pasó y no dejan de ser verdad. Por eso un `episode` tampoco puede tener `valid_from` en el futuro. *(Hito 1)*
 - **«Vigente en t»** significa `valid_from <= t < valid_to`, igual para hechos y episodios. `status` solo indica si la memoria tiene sucesora; la búsqueda filtra por fechas. Así, un hecho con `valid_from` futuro («desde enero el responsable será Luis») no aparece hasta que empieza. *(Hito 1)*
 - **Reemplazar algo ya reemplazado** devuelve un error con el id de su sucesor actual, para que el agente reintente sobre la versión vigente. Evita bifurcar la cadena.
+- **Un hecho nuevo puede reemplazar a varios** (`also_old_ids`): «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos. Cada hecho viejo apunta a la versión nueva con `superseded_by_id`, y la nueva guarda el principal en `supersedes_id`. Es todo o nada, y el historial recorre todas las versiones conectadas. Reglas y alternativas en el [ADR-0008](decisions/0008-un-hecho-reemplaza-a-varios.md).
 - *(Hito 3)* **Enlazar en vez de crear:** `supersede` también acepta `new_id`, el id de una memoria ya guardada, normalmente la que `remember` acaba de guardar y que propuso como reemplazo. Sin esto, el flujo natural del agente dejaba el hecho duplicado. Reglas y alternativas en el [ADR-0005](decisions/0005-dos-formas-de-reemplazar.md).
-- **Olvidar** (`forget(id)`) borra **toda la cadena** del hecho (todas sus versiones) de `memories`, FTS y vector, y devuelve los ids borrados. Si alguien pide olvidar dónde vive, también debe desaparecer dónde vivía.
+- **Olvidar** (`forget(id)`) borra **toda la cadena** del hecho (todas sus versiones, también las de los hechos que una versión unió) de `memories`, FTS y vector, y devuelve los ids borrados. Si alguien pide olvidar dónde vive, también debe desaparecer dónde vivía.
   - *(Hito 1)* Para que desaparezca también del disco:
     - `secure_delete=ON` sobrescribe las filas borradas.
     - Un `optimize` del índice FTS: FTS5 registra los borrados como marcas que solo aplica al fusionar segmentos, así que sin esto los términos sobreviven en segmentos antiguos.
@@ -157,7 +159,7 @@ CREATE VIRTUAL TABLE vec_1 USING vec0(
 
 1. **Saneamiento de la consulta FTS.** El texto del usuario no va directo a `MATCH`, porque comillas, `*`, `NEAR` o `-` romperían la sintaxis o cambiarían su significado. Se tokeniza y cada token se cita: `"token1" OR "token2"`. Se quitan palabras vacías (lista mínima en español e inglés) salvo que no quede ninguna otra. El ranking lo da BM25.
 2. **FTS:** `memories_fts` unida a `memories` con los filtros de workspace, vigencia o `as_of`, y `kind`. *(Hito 4)* La unión es un `CROSS JOIN` para obligar a SQLite a recorrer primero el índice FTS. Con un `JOIN` normal, el planificador elegía recorrer `memories` por su índice y ejecutar la búsqueda de texto una vez por fila, con coste cuadrático: 432 ms con 2.000 memorias frente a 1,9 ms después, con los mismos resultados. Lo encontró el benchmark de escala, y un test comprueba el plan de la consulta. Se piden `max(k × 4, 20)` candidatos, con un máximo de 200.
-3. **Vector:** se calcula el embedding de la consulta con el formato de pregunta del modelo y se hace KNN en el `vec_N` activo con los mismos filtros dentro del KNN. Mismo número de candidatos.
+3. **Vector:** se calcula el embedding de la consulta con el formato de pregunta del modelo. *(v1.2)* La búsqueda tiene dos pasos ([ADR-0010](decisions/0010-busqueda-en-dos-pasos.md)): un KNN sobre los vectores binarios de `vecb_N`, con los mismos filtros dentro, elige al menos 100 candidatos, y se reordenan con los vectores exactos de `vecx_N`. Con menos de 100 memorias que pasen los filtros, el resultado es exacto. Mismo número de candidatos finales.
 4. **Fusión RRF** (solo en modo híbrido): `score(d) = Σ 1 / (60 + rank_i(d))`. Solo usa posiciones, así que no hace falta normalizar BM25 y coseno, que están en escalas incomparables. Se ordena y se corta en `k`. *(Hito 4)* En los empates tienen prioridad los vectores. No se desempata por id: los ULID tienen una parte aleatoria, y los resultados cambiaban entre ejecuciones.
 5. **Modos:** *(Hito 4)* por defecto **solo vectores** ([ADR-0006](decisions/0006-busqueda-por-vectores.md)); `VIGENTE_SEARCH_MODE=hybrid|text` cambia el modo. Si alguna memoria no tiene vector (se guardó con el servicio caído, o es de otro modelo), la búsqueda por vectores no la vería, así que se combina con la de texto y se avisa hasta que se ejecute `reindex`. Comprobarlo cuesta 6 ms con 50.000 memorias. Sin `Embedder` configurado, el modo es `fts_only`. *(Hito 2)* Si el servicio de embeddings falla, también: la respuesta lleva un aviso en `warnings` y nada falla. Al guardar, la memoria se guarda sin vector y `vigente reindex` lo completa después.
 6. **`include_history=true`** quita el filtro de vigencia y marca cada resultado con su `status`.
@@ -200,6 +202,7 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 - **Una conexión por llamada:** el SDK ejecuta las herramientas síncronas en un pool de hilos, y una conexión SQLite no debe compartirse entre hilos. Abrir y cerrar el servicio (conexión, carga de sqlite-vec, pragmas y comprobación de migraciones) cuesta 1,8 ms de mediana y 2,0 ms en p95 (300 mediciones sobre una base con 200 memorias, Apple Silicon). Abrirlo para leer no toma el bloqueo de escritura: el workspace solo se crea si no existe. El cliente HTTP de embeddings sí se comparte.
 - **stdout es el canal del protocolo:** nada escribe en stdout, y los logs del SDK van a stderr en nivel WARNING. A nivel INFO registraría los errores de validación con los valores de entrada, es decir, con contenido de memorias.
 - *(Hito 6)* **Seguridad:** `remember` y `supersede` rechazan secretos (`secret_detected`) y caracteres invisibles que esconden texto (`hidden_characters`). Cada memoria devuelta lleva `flags` si parece una orden, tiene caracteres de ancho cero o contiene un secreto antiguo, y `recall` lo avisa en `warnings` (§11).
+- **Por HTTP:** `vigente-mcp --http` sirve la misma memoria en `/mcp` (*streamable HTTP*), con un token obligatorio (`VIGENTE_TOKEN`, al menos 32 caracteres) que se compara en tiempo constante. Por defecto solo escucha en `127.0.0.1`. Detalle en el [ADR-0009](decisions/0009-compartir-por-http.md).
 - **Arranque:** `vigente-mcp` valida la configuración (base de datos, workspace, URL de embeddings) antes de aceptar conexiones y, si algo falla, termina con un mensaje claro en stderr.
 
 **Prueba con un agente real** *(Hito 3, [informe](../eval/results/agent_demo.md), `eval/agent_demo.py`)*. Cuatro sesiones independientes de Claude Code, que solo tienen las herramientas de Vigente. Ejecutada dos veces, con el mismo comportamiento las dos:
@@ -261,7 +264,7 @@ Lo que sigue de esta sección es el plan original.
 | Sintaxis FTS5 en consultas del usuario | Tokenizar y citar cada token |
 | Mezcla de español e inglés | `unicode61` sin stemming; modelo de embeddings multilingüe |
 | El agente puede no llamar a `supersede` | Descripciones claras de las herramientas; se mide en E2b; se documenta como limitación |
-| KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crece de forma lineal. `recall` tarda 1,5 ms con 1.000 memorias, 13 ms con 10.000 y 62 ms con 50.000, sin contar el modelo; la base ocupa 191 MB con 50.000. Para cientos de miles habría que pasar a vectores cuantizados o a un índice aproximado ([escala](../eval/results/scale.md)) |
+| KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crecía de forma lineal, 62 ms con 50.000 memorias. *(v1.2)* Búsqueda en dos pasos, binaria y luego exacta: 8,5 ms con 50.000 y 36,5 ms con 200.000, sin cambiar los resultados de E1 ni de E2. Sigue siendo lineal: con millones haría falta un índice aproximado (ADR-0010) |
 | Memoria envenenada o secretos guardados *(Hito 6)* | Se rechazan los secretos y los caracteres invisibles al guardar; las órdenes se marcan al leer, `recall` avisa y `vigente review` las lista. Las reglas no paran a un atacante que las conozca (ADR-0007) |
 | Varios clientes (CLI, Claude Code, Codex, Cursor) sobre el mismo archivo | WAL + `busy_timeout`. *(v1.0.1)* Al crear la base a la vez fallaba el 57% de las aperturas; el paso a WAL se reintenta y un test lo comprueba con cuatro procesos. Probado también con tres servidores MCP escribiendo a la vez |
 | Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `vigente reindex` completa lo pendiente |

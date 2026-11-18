@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import httpx
 
 from vigente.errors import ConfigError, EmbeddingError
+from vigente.i18n import tr
 
 Purpose = Literal["document", "query", "similarity"]
 
@@ -115,11 +116,14 @@ class OpenAICompatibleEmbedder:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if not model.strip():
-            raise ConfigError("Falta el nombre del modelo de embeddings.")
+            raise ConfigError(tr("Falta el nombre del modelo de embeddings."))
         if not is_local_url(base_url) and not allow_remote:
             raise ConfigError(
-                f"{base_url} no es una dirección local. Para enviar el contenido de las "
-                "memorias a un servicio remoto, activa VIGENTE_ALLOW_REMOTE=1."
+                tr(
+                    "{url} no es una dirección local. Para enviar el contenido de las memorias a "
+                    "un servicio remoto, activa VIGENTE_ALLOW_REMOTE=1.",
+                    url=base_url,
+                )
             )
         self._model = model
         self._profile = profile or profile_for(model)
@@ -149,11 +153,11 @@ class OpenAICompatibleEmbedder:
         for start in range(0, len(inputs), self._batch_size):
             vectors.extend(self._request(inputs[start : start + self._batch_size]))
         if len({len(vector) for vector in vectors}) > 1:
-            raise EmbeddingError("El servicio devolvió vectores de dimensiones distintas.")
+            raise EmbeddingError(tr("El servicio devolvió vectores de dimensiones distintas."))
         return vectors
 
     def _request(self, batch: list[str]) -> list[list[float]]:
-        problem = "sin respuesta"
+        problem = tr("sin respuesta")
         for attempt in range(self._max_retries + 1):
             if attempt:
                 self._sleep(0.5 * 2 ** (attempt - 1))
@@ -162,29 +166,41 @@ class OpenAICompatibleEmbedder:
                     "embeddings", json={"model": self._model, "input": batch}
                 )
             except httpx.TimeoutException:
-                problem = "tiempo de espera agotado"
+                problem = tr("tiempo de espera agotado")
                 continue
             except httpx.ConnectError as exc:
                 # Conexión rechazada: casi siempre el servicio no está corriendo. Reintentar
                 # solo haría esperar al usuario en cada comando.
                 raise EmbeddingError(
-                    f"No se pudo conectar con {self._base_url} ({type(exc).__name__}). "
-                    "¿Está corriendo el servicio de embeddings?"
+                    tr(
+                        "No se pudo conectar con {url} ({error}). ¿Está corriendo el servicio de "
+                        "embeddings?",
+                        url=self._base_url,
+                        error=type(exc).__name__,
+                    )
                 ) from exc
             except httpx.TransportError as exc:
-                problem = f"no se pudo conectar ({type(exc).__name__})"
+                problem = tr("no se pudo conectar ({error})", error=type(exc).__name__)
                 continue
             if response.status_code == 429 or response.status_code >= 500:
                 problem = f"HTTP {response.status_code}"
                 continue
             if response.status_code >= 400:
                 raise EmbeddingError(
-                    f"El servicio de embeddings rechazó la petición (HTTP "
-                    f"{response.status_code}): {response.text[:200]}"
+                    tr(
+                        "El servicio de embeddings rechazó la petición (HTTP {status}): {body}",
+                        status=response.status_code,
+                        body=response.text[:200],
+                    )
                 )
             return _parse(response, expected=len(batch))
         raise EmbeddingError(
-            f"No se pudieron calcular embeddings con {self._model} en {self._base_url}: {problem}."
+            tr(
+                "No se pudieron calcular embeddings con {model} en {url}: {problem}.",
+                model=self._model,
+                url=self._base_url,
+                problem=problem,
+            )
         )
 
 
@@ -194,11 +210,17 @@ def _parse(response: httpx.Response, *, expected: int) -> list[list[float]]:
         ordered = sorted(enumerate(items), key=lambda pair: int(pair[1].get("index", pair[0])))
         vectors = [[float(value) for value in item["embedding"]] for _, item in ordered]
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise EmbeddingError("Respuesta de embeddings con formato inesperado.") from exc
+        raise EmbeddingError(tr("Respuesta de embeddings con formato inesperado.")) from exc
     if len(vectors) != expected:
-        raise EmbeddingError(f"Se esperaban {expected} vectores y llegaron {len(vectors)}.")
+        raise EmbeddingError(
+            tr(
+                "Se esperaban {expected} vectores y llegaron {got}.",
+                expected=expected,
+                got=len(vectors),
+            )
+        )
     if any(not vector for vector in vectors):
-        raise EmbeddingError("El servicio devolvió un vector vacío.")
+        raise EmbeddingError(tr("El servicio devolvió un vector vacío."))
     if not all(math.isfinite(value) for vector in vectors for value in vector):
-        raise EmbeddingError("El servicio devolvió valores no numéricos (NaN o infinito).")
+        raise EmbeddingError(tr("El servicio devolvió valores no numéricos (NaN o infinito)."))
     return vectors

@@ -11,26 +11,31 @@
 <text x="48" y="107.0" text-anchor="end" fill="#57606a">75%</text>
 <line x1="56" x2="624" y1="48.0" y2="48.0" stroke="#d0d7de" stroke-width="1"/>
 <text x="48" y="52.0" text-anchor="end" fill="#57606a">100%</text>
-<rect x="77.3" y="167.2" width="45.7" height="100.8" fill="#2f7d5b"><title>la nueva (vigente): 46%</title></rect>
-<text x="100.1" y="162.2" text-anchor="middle" fill="#1f2328">46%</text>
-<rect x="127.0" y="148.8" width="45.7" height="119.2" fill="#e0913b"><title>la vieja (obsoleta): 54%</title></rect>
-<text x="149.8" y="143.8" text-anchor="middle" fill="#1f2328">54%</text>
-<text x="127.0" y="288" text-anchor="middle" fill="#1f2328">texto</text>
-<rect x="219.3" y="167.2" width="45.7" height="100.8" fill="#2f7d5b"><title>la nueva (vigente): 46%</title></rect>
-<text x="242.2" y="162.2" text-anchor="middle" fill="#1f2328">46%</text>
-<rect x="269.0" y="148.8" width="45.7" height="119.2" fill="#e0913b"><title>la vieja (obsoleta): 54%</title></rect>
-<text x="291.9" y="143.8" text-anchor="middle" fill="#1f2328">54%</text>
-<text x="269.0" y="288" text-anchor="middle" fill="#1f2328">vector</text>
-<rect x="361.3" y="170.2" width="45.7" height="97.8" fill="#2f7d5b"><title>la nueva (vigente): 44%</title></rect>
-<text x="384.2" y="165.2" text-anchor="middle" fill="#1f2328">44%</text>
-<rect x="411.0" y="145.8" width="45.7" height="122.2" fill="#e0913b"><title>la vieja (obsoleta): 56%</title></rect>
-<text x="433.9" y="140.8" text-anchor="middle" fill="#1f2328">56%</text>
-<text x="411.0" y="288" text-anchor="middle" fill="#1f2328">híbrida</text>
-<rect x="503.3" y="167.2" width="45.7" height="100.8" fill="#2f7d5b"><title>la nueva (vigente): 46%</title></rect>
-<text x="526.1" y="162.2" text-anchor="middle" fill="#1f2328">46%</text>
-<rect x="553.0" y="148.8" width="45.7" height="119.2" fill="#e0913b"><title>la vieja (obsoleta): 54%</title></rect>
-<text x="575.9" y="143.8" text-anchor="middle" fill="#1f2328">54%</text>
-<text x="553.0" y="288" text-anchor="middle" fill="#1f2328">híbrida ponderada</text>
+<rect x="73.0" y="167.2" width="35.8" height="100.8" fill="#2f7d5b"><title>la nueva (vigente): 46%</title></rect>
+<text x="90.9" y="162.2" text-anchor="middle" fill="#1f2328">46%</text>
+<rect x="112.8" y="148.8" width="35.8" height="119.2" fill="#e0913b"><title>la vieja (obsoleta): 54%</title></rect>
+<text x="130.7" y="143.8" text-anchor="middle" fill="#1f2328">54%</text>
+<text x="112.8" y="288" text-anchor="middle" fill="#1f2328">texto</text>
+<rect x="186.6" y="167.2" width="35.8" height="100.8" fill="#2f7d5b"><title>la nueva (vigente): 46%</title></rect>
+<text x="204.5" y="162.2" text-anchor="middle" fill="#1f2328">46%</text>
+<rect x="226.4" y="148.8" width="35.8" height="119.2" fill="#e0913b"><title>la vieja (obsoleta): 54%</title></rect>
+<text x="244.3" y="143.8" text-anchor="middle" fill="#1f2328">54%</text>
+<text x="226.4" y="288" text-anchor="middle" fill="#1f2328">vector</text>
+<rect x="300.2" y="170.2" width="35.8" height="97.8" fill="#2f7d5b"><title>la nueva (vigente): 44%</title></rect>
+<text x="318.1" y="165.2" text-anchor="middle" fill="#1f2328">44%</text>
+<rect x="340.0" y="145.8" width="35.8" height="122.2" fill="#e0913b"><title>la vieja (obsoleta): 56%</title></rect>
+<text x="357.9" y="140.8" text-anchor="middle" fill="#1f2328">56%</text>
+<text x="340.0" y="288" text-anchor="middle" fill="#1f2328">híbrida</text>
+<rect x="413.8" y="167.2" width="35.8" height="100.8" fill="#2f7d5b"><title>la nueva (vigente): 46%</title></rect>
+<text x="431.7" y="162.2" text-anchor="middle" fill="#1f2328">46%</text>
+<rect x="453.6" y="148.8" width="35.8" height="119.2" fill="#e0913b"><title>la vieja (obsoleta): 54%</title></rect>
+<text x="471.5" y="143.8" text-anchor="middle" fill="#1f2328">54%</text>
+<text x="453.6" y="288" text-anchor="middle" fill="#1f2328">híbrida ponderada</text>
+<rect x="527.4" y="167.2" width="35.8" height="100.8" fill="#2f7d5b"><title>la nueva (vigente): 46%</title></rect>
+<text x="545.3" y="162.2" text-anchor="middle" fill="#1f2328">46%</text>
+<rect x="567.2" y="148.8" width="35.8" height="119.2" fill="#e0913b"><title>la vieja (obsoleta): 54%</title></rect>
+<text x="585.1" y="143.8" text-anchor="middle" fill="#1f2328">54%</text>
+<text x="567.2" y="288" text-anchor="middle" fill="#1f2328">automática</text>
 <rect x="56" y="314" width="12" height="12" fill="#2f7d5b"/>
 <text x="74" y="324" fill="#1f2328">la nueva (vigente)</text>
 <rect x="212" y="314" width="12" height="12" fill="#e0913b"/>

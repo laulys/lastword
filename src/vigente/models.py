@@ -21,11 +21,13 @@ from pydantic import (
 )
 
 from vigente import safety
+from vigente.i18n import tr
 
 MAX_CONTENT_CHARS = 4000
 MAX_TAGS = 20
 MAX_K = 50
 MAX_LIST_LIMIT = 100
+MAX_ALSO_SUPERSEDED = 20  # hechos que una sola versión nueva puede reemplazar además de old_id
 
 
 class Kind(StrEnum):
@@ -90,9 +92,13 @@ class SupersedeRequest(_Input):
     - `new_content`: se crea ahora (el agente ya sabía qué hecho cambiaba).
     - `new_id`: ya se guardó con remember, que la propuso como reemplazo. Enlazarla evita
       duplicar el hecho; su vigencia y demás datos son los de esa memoria.
+
+    Una versión nueva puede reemplazar a varios hechos a la vez (`also_old_ids`): «Ana y Luis
+    se mudaron a Lisboa» cierra la ciudad de los dos (ADR-0008).
     """
 
     old_id: MemoryId
+    also_old_ids: list[MemoryId] = Field(default_factory=list, max_length=MAX_ALSO_SUPERSEDED)
     new_content: Content | None = None
     new_id: MemoryId | None = None
     valid_from: UtcDatetime | None = None
@@ -104,11 +110,19 @@ class SupersedeRequest(_Input):
     @model_validator(mode="after")
     def _exactly_one_new_version(self) -> Self:
         if (self.new_content is None) == (self.new_id is None):
-            raise ValueError("indica new_content o new_id (uno de los dos)")
+            raise ValueError(tr("indica new_content o new_id (uno de los dos)"))
         extras = (self.valid_from, self.tags, self.source, self.confidence)
         if self.new_id is not None and any(value is not None for value in extras):
-            raise ValueError("con new_id, la vigencia y los demás datos son los de esa memoria")
+            raise ValueError(tr("con new_id, la vigencia y los demás datos son los de esa memoria"))
+        olds = [self.old_id, *self.also_old_ids]
+        if len(set(olds)) != len(olds):
+            raise ValueError(tr("old_id y also_old_ids no pueden repetir hechos"))
         return self
+
+    @property
+    def old_ids(self) -> list[str]:
+        """Todos los hechos que la versión nueva reemplaza, empezando por el principal."""
+        return [self.old_id, *self.also_old_ids]
 
 
 class RecallQuery(_Input):
@@ -121,7 +135,7 @@ class RecallQuery(_Input):
     @model_validator(mode="after")
     def _history_excludes_as_of(self) -> Self:
         if self.include_history and self.as_of is not None:
-            raise ValueError("include_history y as_of no se pueden combinar")
+            raise ValueError(tr("include_history y as_of no se pueden combinar"))
         return self
 
 
@@ -180,6 +194,7 @@ class RememberResult(BaseModel):
 class SupersedeResult(BaseModel):
     new: Memory
     old: Memory
+    also_old: list[Memory] = Field(default_factory=list)  # los demás hechos que reemplazó
     warnings: list[str] = Field(default_factory=list)
 
 

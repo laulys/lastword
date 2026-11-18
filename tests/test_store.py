@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import sqlite_vec
 
 from tests.helpers import T0
 from vigente import store
@@ -98,16 +99,74 @@ def test_naive_datetimes_are_a_bug() -> None:
         store.to_ms(datetime(2026, 3, 1))
 
 
-def test_upgrades_a_database_from_the_previous_schema(db_path: Path) -> None:
+def _sql_migration(version: int) -> str:
+    step = store._MIGRATIONS[version - 1]
+    assert isinstance(step, str)
+    return step
+
+
+def test_upgrades_a_database_from_the_first_schema(db_path: Path) -> None:
     old = sqlite3.connect(db_path, autocommit=True)
-    old.executescript(store._MIGRATIONS[0])
+    old.executescript(_sql_migration(1))
     old.execute("PRAGMA user_version = 1")
     old.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
     old.close()
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 2
+    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 4
     assert store.embedding_spaces(conn) == []
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(memories)")}
+    assert "memories_superseded_by" in indexes  # v3: varias versiones anteriores
     assert [tuple(row) for row in conn.execute("SELECT id FROM workspaces")] == [("test",)]
+    conn.close()
+
+
+def test_upgrades_exact_vectors_to_two_stage_search(db_path: Path) -> None:
+    """Una base de la v1.1 (vectores exactos en sqlite-vec) pasa a la búsqueda en dos pasos
+    sin perder ningún vector (ADR-0010)."""
+    raw = sqlite3.connect(db_path, autocommit=True)
+    raw.enable_load_extension(True)
+    sqlite_vec.load(raw)
+    for version in (1, 2, 3):
+        raw.executescript(_sql_migration(version))
+    raw.execute("PRAGMA user_version = 3")
+    raw.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
+    raw.execute(
+        "INSERT INTO embedding_spaces (id, model, dim, table_name, created_at) "
+        "VALUES (1, 'm', 4, 'vec_1', 0)"
+    )
+    raw.execute(
+        "CREATE VIRTUAL TABLE vec_1 USING vec0(workspace_id TEXT PARTITION KEY, kind TEXT, "
+        "valid_from INTEGER, valid_to INTEGER, embedding FLOAT[4] distance_metric=cosine)"
+    )
+    vectors = {
+        "Ana vive en Madrid": [1.0, 0.0, 0.0, 0.0],
+        "Luis vive en Valencia": [0.0, 1.0, 0.0, 0.0],
+    }
+    for seq, (content, vector) in enumerate(vectors.items(), start=1):
+        raw.execute(
+            "INSERT INTO memories (seq, id, workspace_id, kind, content, created_at, valid_from, "
+            "status, embedding_model) VALUES (?, ?, 'test', 'fact', ?, 0, 0, 'active', 'm')",
+            (seq, f"01KE0000000000000000000{seq:03d}", content),
+        )
+        raw.execute(
+            "INSERT INTO memories_fts (rowid, content, tags) VALUES (?, ?, '')", (seq, content)
+        )
+        raw.execute(
+            "INSERT INTO vec_1 (rowid, workspace_id, kind, valid_from, valid_to, embedding) "
+            "VALUES (?, 'test', 'fact', 0, ?, ?)",
+            (seq, store.OPEN_END_MS, sqlite_vec.serialize_float32(vector)),
+        )
+    raw.close()
+
+    conn = store.connect(db_path)
+    assert store.schema_version(conn) == 4
+    (space,) = store.embedding_spaces(conn)
+    assert (space.table, space.exact) == ("vecb_1", "vecx_1")
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "vec_1" not in tables
+    hits = store.vector_search(conn, space, "test", [0.0, 0.9, 0.1, 0.0], limit=2, at_ms=1)
+    assert [memory.content for memory, _ in hits] == ["Luis vive en Valencia", "Ana vive en Madrid"]
+    assert store.integrity_problems(conn) == []
     conn.close()
 
 

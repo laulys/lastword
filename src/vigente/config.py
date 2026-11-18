@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vigente.embeddings import DEFAULT_BASE_URL, OpenAICompatibleEmbedder
+from vigente.i18n import tr
 from vigente.models import SearchMode
 
 DEFAULT_EMBED_MODEL = "embeddinggemma"  # ver ADR-0004
@@ -82,4 +83,10 @@ def parse_search_mode(raw: str) -> SearchMode:
         return SearchMode(value)
     except ValueError:
         options = ", ".join(mode.value for mode in SearchMode)
-        raise ValueError(f"el modo de búsqueda {raw!r} no existe; usa {options}") from None
+        raise ValueError(
+            tr(
+                "el modo de búsqueda {mode} no existe; usa {options}",
+                mode=repr(raw),
+                options=options,
+            )
+        ) from None

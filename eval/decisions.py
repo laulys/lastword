@@ -15,7 +15,8 @@ MIN_MRR_GAIN = 0.01
 def main() -> None:
     e1 = json.loads((HERE / "e1_synthetic.json").read_text(encoding="utf-8"))
     e2 = json.loads((HERE / "e2_longmemeval.json").read_text(encoding="utf-8"))
-    modes = list(e1["mrr"])
+    # Los cuatro modos del hito 4; el automático se decidió después, en E4.
+    modes = ["texto", "vector", "híbrida", "híbrida ponderada"]
     mean = {mode: (e1["mrr"][mode] + e2["mrr"][mode]) / 2 for mode in modes}
     best = max(modes, key=lambda mode: mean[mode])
     gain = mean[best] - mean[CURRENT_MODE]

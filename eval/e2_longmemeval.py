@@ -21,6 +21,7 @@ from pathlib import Path
 
 from cache import CachedEmbedder
 from charts import bar_chart
+from exact_cases import has_codes
 from longmemeval import Item, load
 from metrics import pct
 
@@ -37,7 +38,7 @@ CHART = HERE / "results" / "e2_actualizaciones.svg"
 WORKSPACE = "e2"
 POOL = 50  # mensajes que se piden a cada búsqueda
 VECTOR_WEIGHT = 2.0
-MODES = ("texto", "vector", "híbrida", "híbrida ponderada")
+MODES = ("texto", "vector", "híbrida", "híbrida ponderada", "automática")  # automática: E4
 
 
 class Clock:
@@ -110,6 +111,8 @@ def evaluate(item: Item, embedder: Embedder) -> dict[str, Outcome]:
             text_hits, vector_hits, limit=POOL, vector_weight=VECTOR_WEIGHT
         ),
     }
+    # Automática (E4): vector, salvo que la pregunta traiga un código.
+    rankings["automática"] = rankings["híbrida"] if has_codes(item.question) else rankings["vector"]
     conn.close()
     evidence = set(item.evidence_sessions)
     outcomes = {}

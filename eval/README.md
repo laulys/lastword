@@ -75,6 +75,22 @@ Los secretos se generan al ejecutar con una semilla fija: el repositorio no cont
 
 Los casos y los detectores los escribió la misma persona. Aunque los casos se escribieron antes, quien atacara conociendo las reglas las esquivaría con más facilidad: la detección medida es **un techo**, no la que tendría frente a un atacante real. La defensa de fondo sigue siendo que el agente trate la memoria como datos.
 
+## Protocolo: búsquedas exactas (E4)
+
+Las evaluaciones anteriores apenas tenían consultas que dependieran de un código exacto, que es donde la búsqueda por texto suele aportar. E4 lo mide, con reglas fijadas antes de implementar el modo nuevo:
+
+- **Datos:** [`exact_cases.py`](exact_cases.py), 36 memorias de 7 tipos (errores, pedidos, facturas, incidencias, versiones, productos y envíos) que se parecen mucho entre sí y solo cambian en el código («el error E-4031…» frente a «el error E-4013…»), más 15 memorias del mismo negocio sin códigos. Cada pregunta nombra un código: acierta si devuelve su memoria.
+- **Modos:** texto, vector, híbrida y **automática**. La automática busca por vectores, salvo que la consulta tenga un código, y entonces combina con texto (híbrida). Un código es una palabra de al menos 3 caracteres con alguna cifra, salvo años (1900–2099) y fechas: E-4031, 7781, F-2026-0117, 2.4.1. La excepción de años y fechas se añadió antes de medir, al ver que «¿dónde vivía Ana en 2025?» habría pasado por código.
+- **Métricas:** Recall@1 y MRR.
+- **Regla:** el modo automático pasa a ser el de por defecto si **(a)** en E4 su MRR supera al de vector en al menos 0.05 **y (b)** en E1 y en E2 su MRR no queda más de 0.005 por debajo del de vector. Si no, se queda vector.
+
+## Protocolo: búsqueda en dos pasos
+
+La búsqueda por vectores era exacta y su coste crecía de forma lineal ([escala](results/scale.md)). La alternativa: buscar con los vectores comprimidos a 1 bit por dimensión (96 bytes en vez de 3 KB) para elegir candidatos, con los filtros dentro de la búsqueda, y reordenarlos con los vectores exactos.
+
+- **Prueba previa** con los 89.539 mensajes reales de LongMemEval y sus 470 preguntas: reordenando 100 candidatos se recupera el 97,9% del top 10 exacto, y el primer resultado coincide en el 100% de las preguntas. Recorrer los vectores binarios cuesta 5,5 ms; leer los candidatos exactos desde sqlite-vec, 15 ms, y desde una tabla SQLite normal, 0,1 ms. De ahí el diseño: binarios en sqlite-vec y exactos en una tabla normal.
+- **Regla:** se adopta si **(a)** el MRR de E1 y el de E2 no bajan más de 0.005 y **(b)** con 50.000 memorias, `recall` es al menos un 30% más rápido que la búsqueda exacta (p50 de [`scale.py`](scale.py)). Si no, se queda la exacta.
+
 ## Reproducibilidad
 
 E1 y E2 dan resultados idénticos en ejecuciones repetidas, comprobado comparando las salidas de dos ejecuciones. Para conseguirlo hubo que quitar el desempate por id en la fusión, porque los ULID tienen una parte aleatoria. Las latencias de `scale.py` varían unas décimas de milisegundo entre ejecuciones.
@@ -89,4 +105,6 @@ uv run python eval/e2_longmemeval.py
 uv run python eval/decisions.py
 uv run python eval/scale.py                  # latencia y escala
 uv run python eval/e3_security.py            # seguridad; con LongMemEval descargado, también texto real
+uv run python eval/e4_exact.py               # códigos exactos
+uv run python eval/masked_similarity.py      # propuestas con los valores tapados (ADR-0004)
 ```

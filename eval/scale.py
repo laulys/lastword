@@ -98,7 +98,7 @@ def measure(size: int, workdir: Path) -> dict[str, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sizes", type=int, nargs="+", default=[1_000, 10_000, 50_000])
+    parser.add_argument("--sizes", type=int, nargs="+", default=[1_000, 10_000, 50_000, 200_000])
     sizes = parser.parse_args().sizes
     results = {}
     with tempfile.TemporaryDirectory(prefix="vigente-scale-") as tmp:

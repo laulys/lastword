@@ -251,3 +251,23 @@ def test_bad_configuration_fails_at_startup_with_a_clear_message(
     assert result.returncode != 0
     assert "configuración no válida" in result.stderr
     assert result.stdout == ""  # stdout es el canal del protocolo: nada de ruido
+
+
+@pytest.mark.anyio
+async def test_one_new_fact_can_replace_several(server: MCPServer, clock: FakeClock) -> None:
+    async with Client(server) as client:
+        ana = (await ok(client, "remember", content="Ana vive en Madrid"))["memory"]
+        clock.advance(minutes=1)
+        luis = (await ok(client, "remember", content="Luis vive en Valencia"))["memory"]
+        clock.advance(days=1)
+        result = await ok(
+            client,
+            "supersede",
+            old_id=ana["id"],
+            also_old_ids=[luis["id"]],
+            new_content="Ana y Luis viven en Lisboa",
+        )
+        versions = await ok(client, "history", memory_id=luis["id"])
+    assert result["old"]["replaced_by"] == result["new"]["id"]
+    assert [m["replaced_by"] for m in result["also_old"]] == [result["new"]["id"]]
+    assert [v["id"] for v in versions["versions"]] == [ana["id"], luis["id"], result["new"]["id"]]

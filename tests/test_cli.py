@@ -176,3 +176,15 @@ class TestSafety:
         run(db_path, "add", "El horario es de 7:30 a 14:00")
         result = run(db_path, "review", as_json=False)
         assert "Nada marcado" in result.stdout
+
+
+def test_supersede_can_replace_several_facts(db_path: Path) -> None:
+    ana = ok(run(db_path, "add", "Ana vive en Madrid", "--valid-from", "2026-01-01"))["memory"]
+    luis = ok(run(db_path, "add", "Luis vive en Valencia", "--valid-from", "2026-01-02"))["memory"]
+    result = ok(
+        run(db_path, "supersede", ana["id"], "Ana y Luis viven en Lisboa", "--also", luis["id"])
+    )
+    assert [m["id"] for m in result["also_old"]] == [luis["id"]]
+    assert result["also_old"][0]["superseded_by_id"] == result["new"]["id"]
+    human = run(db_path, "history", luis["id"], as_json=False)
+    assert "Ana vive en Madrid" in human.stdout and "Lisboa" in human.stdout
