@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, cast
 
@@ -17,7 +17,12 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from vigente.config import DEFAULT_EMBED_MODEL, EmbeddingSettings
+from vigente.config import (
+    DEFAULT_DB_PATH,
+    DEFAULT_EMBED_MODEL,
+    DEFAULT_WORKSPACE,
+    EmbeddingSettings,
+)
 from vigente.embeddings import DEFAULT_BASE_URL
 from vigente.errors import VigenteError
 from vigente.models import (
@@ -32,11 +37,9 @@ from vigente.models import (
     Status,
     SupersedeRequest,
     SupersedeResult,
+    describe_validation_error,
 )
 from vigente.service import MemoryService
-
-DEFAULT_DB = Path("~/.vigente/vigente.db")
-DEFAULT_WORKSPACE = "default"
 
 app = typer.Typer(
     help="Vigente: memoria para agentes de IA que sabe qué sigue siendo verdad.",
@@ -47,7 +50,6 @@ out = Console()
 err = Console(stderr=True)
 
 _KIND = {Kind.FACT: "hecho", Kind.EPISODE: "episodio"}
-_STATUS = {Status.ACTIVE: "activa", Status.SUPERSEDED: "reemplazada"}
 _SOURCES = {("fts",): "texto", ("vector",): "vector", ("fts", "vector"): "ambos"}
 
 
@@ -64,7 +66,7 @@ def main(
     ctx: typer.Context,
     db: Annotated[
         Path, typer.Option("--db", envvar="VIGENTE_DB", help="Archivo SQLite de la memoria.")
-    ] = DEFAULT_DB,
+    ] = DEFAULT_DB_PATH,
     workspace: Annotated[
         str,
         typer.Option(
@@ -125,14 +127,6 @@ def _fail(
     raise typer.Exit(exit_code)
 
 
-def _describe(exc: ValidationError) -> str:
-    parts = []
-    for error in exc.errors():
-        location = ".".join(str(part) for part in error["loc"]) or "entrada"
-        parts.append(f"{location}: {error['msg']}")
-    return "; ".join(parts)
-
-
 @contextmanager
 def _service(ctx: typer.Context) -> Iterator[MemoryService]:
     options = _options(ctx)
@@ -145,7 +139,7 @@ def _service(ctx: typer.Context) -> Iterator[MemoryService]:
     except VigenteError as exc:
         _fail(options, exc.code, exc.message, current_id=exc.current_id)
     except ValidationError as exc:
-        _fail(options, "invalid_input", _describe(exc), exit_code=2)
+        _fail(options, "invalid_input", describe_validation_error(exc), exit_code=2)
     finally:
         if service is not None:
             service.close()
@@ -187,7 +181,16 @@ def _validity(memory: Memory) -> str:
 
 
 def _state(memory: Memory) -> str:
-    return _KIND[memory.kind] if memory.kind is Kind.EPISODE else _STATUS[memory.status]
+    """Estado según las fechas, no según `status`: un hecho con sucesora sigue vigente
+    hasta que la sucesora empieza (por ejemplo, un cambio anunciado para la semana próxima)."""
+    if memory.kind is Kind.EPISODE:
+        return _KIND[memory.kind]
+    now = datetime.now(UTC)
+    if memory.valid_from > now:
+        return "futura"
+    if memory.valid_to is not None and memory.valid_to <= now:
+        return "reemplazada"
+    return "vigente"
 
 
 def _table(title: str | None = None) -> Table:
@@ -236,8 +239,8 @@ def _render_remember(result: RememberResult) -> None:
     out.print(f"[green]Guardada[/] {memory.id} ({_KIND[memory.kind]}, {_validity(memory)})")
     if result.possible_supersedes:
         out.print(
-            "\nPosibles reemplazos. Si alguno dejó de ser verdad, usa "
-            '[bold]vigente supersede <id> "<texto nuevo>"[/]:'
+            "\nPosibles reemplazos. Si lo que acabas de guardar deja obsoleto alguno, usa "
+            f"[bold]vigente supersede <id> --by {memory.id}[/]:"
         )
         out.print(_hits_table(result.possible_supersedes))
 
@@ -300,23 +303,30 @@ def add(
 def supersede(
     ctx: typer.Context,
     old_id: Annotated[str, typer.Argument(help="Id de la versión vigente.")],
-    new_content: Annotated[str, typer.Argument(help="Texto de la versión nueva.")],
+    new_content: Annotated[
+        str | None, typer.Argument(help="Texto de la versión nueva (o usa --by).")
+    ] = None,
+    by: Annotated[
+        str | None,
+        typer.Option("--by", help="Id de una memoria ya guardada que pasa a ser la versión nueva."),
+    ] = None,
     valid_from: Annotated[
         str | None, typer.Option(help="Desde cuándo es verdad lo nuevo (ISO 8601).")
     ] = None,
     reason: Annotated[str | None, typer.Option(help="Por qué cambió.")] = None,
 ) -> None:
-    """Reemplaza un hecho por su versión nueva, conservando el historial."""
+    """Reemplaza un hecho por su versión nueva, conservando el historial.
+
+    Con texto, crea la versión nueva. Con --by, enlaza una memoria que ya guardaste, por
+    ejemplo la que `add` acaba de proponer como reemplazo.
+    """
     with _service(ctx) as service:
-        request = SupersedeRequest.model_validate(
-            {
-                "old_id": old_id,
-                "new_content": new_content,
-                "valid_from": valid_from,
-                "reason": reason,
-                "source": "cli",
-            }
-        )
+        fields: dict[str, object] = {"old_id": old_id, "reason": reason}
+        if by is not None:
+            fields |= {"new_id": by, "new_content": new_content, "valid_from": valid_from}
+        else:
+            fields |= {"new_content": new_content, "valid_from": valid_from, "source": "cli"}
+        request = SupersedeRequest.model_validate(fields)
         result = service.supersede(request)
         _emit(ctx, result, lambda: _render_supersede(result))
         _warn(ctx, result.warnings)
