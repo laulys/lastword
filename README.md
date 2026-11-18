@@ -12,7 +12,7 @@ When a fact changes, most agent memories either overwrite it or keep both versio
 - `as_of` returns what was true **at any past date**.
 - `history` shows how a fact changed.
 
-It runs locally as an **MCP server**, so Claude Code, Cursor or any MCP client can use it. Everything lives in a single SQLite file.
+It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP client can use it, and they can share the same memory. Everything lives in a single SQLite file.
 
 ![A real CLI session: a fact changes, Vigente proposes the replacement, and search returns what is true now or at a past date](demo/vigente.gif)
 
@@ -64,6 +64,12 @@ uv run vigente search "¿qué base de datos usamos?" --as-of 2026-06-01
 claude mcp add vigente -e VIGENTE_WORKSPACE=my-project -- uv --directory /path/to/vigente run vigente-mcp
 ```
 
+**Codex:**
+
+```bash
+codex mcp add vigente --env VIGENTE_WORKSPACE=my-project -- uv --directory /path/to/vigente run vigente-mcp
+```
+
 **Cursor** (`.cursor/mcp.json`) or **Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
@@ -87,7 +93,7 @@ claude mcp add vigente -e VIGENTE_WORKSPACE=my-project -- uv --directory /path/t
 | `list_memories` | Lists memories with filters |
 | `forget` | Deletes a fact and all its versions, also from disk (marked as destructive) |
 
-The workspace is fixed by the server configuration, so an agent cannot read another one.
+The workspace is fixed by the server configuration, so an agent cannot read another one. Clients configured with the same workspace share the memory, even at the same time: what Claude Code saves, Codex and Cursor find.
 
 > **If your client has its own memory**, the agent may save the same fact in both places, and only Vigente will know when it stops being true. In Claude Code you can turn its auto memory off with `"autoMemoryEnabled": false` in the project settings, or with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ([docs](https://code.claude.com/docs/en/memory)).
 
@@ -124,6 +130,7 @@ The full design is in [docs/architecture.md](docs/architecture.md).
 - **Chains are linear:** a new version replaces one fact. «Ana and Luis moved to Lisbon» cannot close two facts at once.
 - **Search is exact (brute-force KNN).** Its cost grows linearly. Hundreds of thousands of memories would need quantized vectors or an approximate index.
 - **The evaluation has blind spots.** Few queries rely on exact matches (error codes, IDs), which is where text search usually helps, and the synthetic set is built from templates.
+- **The memory is local.** Clients on the same computer share it; cloud agents and teammates cannot reach it.
 - **The CLI, the ADRs and the evaluation reports are in Spanish.**
 
 ## Related work

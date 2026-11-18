@@ -12,7 +12,7 @@ Cuando un hecho cambia, la mayoría de las memorias para agentes lo sobrescriben
 - `as_of` devuelve lo que era verdad **en cualquier fecha pasada**.
 - `history` muestra cómo cambió un hecho.
 
-Funciona en local como **servidor MCP**, así que Claude Code, Cursor o cualquier cliente MCP pueden usarlo. Todo vive en un único archivo SQLite.
+Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o cualquier cliente MCP pueden usarlo y compartir la misma memoria. Todo vive en un único archivo SQLite.
 
 ![Una sesión real de la CLI: un hecho cambia, Vigente propone el reemplazo y la búsqueda devuelve lo vigente ahora o en una fecha pasada](demo/vigente.gif)
 
@@ -64,6 +64,12 @@ uv run vigente search "¿qué base de datos usamos?" --as-of 2026-06-01
 claude mcp add vigente -e VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /ruta/a/vigente run vigente-mcp
 ```
 
+**Codex:**
+
+```bash
+codex mcp add vigente --env VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /ruta/a/vigente run vigente-mcp
+```
+
 **Cursor** (`.cursor/mcp.json`) o **Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
@@ -87,7 +93,7 @@ claude mcp add vigente -e VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /ruta/
 | `list_memories` | Lista memorias con filtros |
 | `forget` | Borra un hecho y todas sus versiones, también del disco (marcada como destructiva) |
 
-El workspace lo fija la configuración del servidor, así que un agente no puede leer otro.
+El workspace lo fija la configuración del servidor, así que un agente no puede leer otro. Los clientes configurados con el mismo workspace comparten la memoria, incluso a la vez: lo que guarda Claude Code lo encuentran Codex y Cursor.
 
 > **Si tu cliente tiene memoria propia**, el agente puede guardar lo mismo en los dos sitios, y solo Vigente sabrá cuándo deja de ser verdad. En Claude Code puedes desactivar su memoria automática con `"autoMemoryEnabled": false` en la configuración del proyecto, o con `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ([documentación](https://code.claude.com/docs/en/memory)).
 
@@ -123,6 +129,7 @@ El diseño completo está en [docs/architecture.md](docs/architecture.md).
 - **Las propuestas de reemplazo tienen ruido.** La similitud no distingue «esto actualiza aquello» de «esto añade información sobre lo mismo», así que las frases del mismo tema también reciben propuestas. Por eso decide el agente.
 - **Las cadenas son lineales:** una versión nueva reemplaza a un solo hecho. «Ana y Luis se mudaron a Lisboa» no puede cerrar dos hechos a la vez.
 - **La búsqueda es exacta (KNN por fuerza bruta).** Su coste crece de forma lineal. Con cientos de miles de memorias harían falta vectores cuantizados o un índice aproximado.
+- **La memoria es local.** La comparten los clientes del mismo ordenador; los agentes en la nube y tus compañeros no llegan a ella.
 - **La evaluación tiene puntos ciegos.** Hay pocas consultas de coincidencia exacta (códigos de error, identificadores), que es donde la búsqueda por texto suele aportar, y el conjunto sintético sale de plantillas.
 
 ## Trabajo relacionado
