@@ -257,9 +257,15 @@ class MemoryService:
         if self._embedder is None:
             raise ConfigError(tr("No hay modelo de embeddings configurado."))
         model = self._embedder.model
+        # Un modelo puede tener varios espacios si cambió de dimensión. Cuál es el actual solo
+        # se sabe preguntando al modelo; con un único espacio no hace falta.
+        dim: int | None = None
+        if len([s for s in store.embedding_spaces(self._conn) if s.model == model]) > 1:
+            dim = len(self._embedder.embed(["dimensión"], "document")[0])
         embedded = 0
+        idle_passes = 0
         while True:
-            space = store.find_embedding_space(self._conn, model)
+            space = store.find_embedding_space(self._conn, model, dim)
             pending = store.memories_without_vector(
                 self._conn, self.workspace_id, space, limit=REINDEX_BATCH
             )
@@ -272,17 +278,24 @@ class MemoryService:
                 target = store.ensure_embedding_space(
                     self._conn, model, len(vectors[0]), store.to_ms(self._now())
                 )
-                for (seq, _), vector in zip(pending, vectors, strict=True):
-                    # Releer dentro de la transacción: pudo cambiar o borrarse mientras tanto.
+                for (seq, memory), vector in zip(pending, vectors, strict=True):
+                    # Releer dentro de la transacción: mientras se calculaban los vectores pudo
+                    # borrarse, y su número de fila pudo pasar a una memoria nueva. El vector
+                    # de un texto olvidado no debe acabar en otra memoria.
                     current = store.get_memory_by_seq(self._conn, self.workspace_id, seq)
-                    if current is None or store.has_vector(self._conn, target, seq):
+                    if current is None or current.id != memory.id:
+                        continue
+                    if store.has_vector(self._conn, target, seq):
                         continue
                     store.insert_vector(self._conn, target, seq, current, vector)
                     added += 1
             embedded += added
-            if added == 0:  # nada que hacer en este lote: evita un bucle infinito
+            # Un lote sin nada que guardar puede deberse a memorias borradas entretanto: se
+            # mira una vez más. Dos seguidos, y se para: evita un bucle infinito.
+            idle_passes = 0 if added else idle_passes + 1
+            if idle_passes == 2:
                 break
-        space = store.find_embedding_space(self._conn, model)
+        space = store.find_embedding_space(self._conn, model, dim)
         return ReindexResult(
             model=model, dim=None if space is None else space.dim, embedded=embedded
         )
@@ -345,19 +358,12 @@ class MemoryService:
             min_similarity=self._embedder.profile.min_recall_similarity,
         )
         if self._search_mode is SearchMode.VECTOR:
-            model = self._embedder.model
-            if not store.has_memories_without_vector(self._conn, self.workspace_id, model):
+            if not store.has_memories_without_vector(self._conn, self.workspace_id, space):
                 return RecallResult(
                     mode="vector", results=vector_hits[: query.k], warnings=warnings
                 )
             # Las memorias sin vector solo las encuentra el texto: se combina para no perderlas.
-            warnings.append(
-                tr(
-                    "Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para "
-                    "no perderlas. Ejecuta `vigente reindex`.",
-                    model=model,
-                )
-            )
+            warnings.append(_without_vector_warning(self._embedder.model))
         fused = retrieval.hybrid(text_hits(), vector_hits, limit=query.k)
         return RecallResult(mode="hybrid", results=fused, warnings=warnings)
 
@@ -508,7 +514,24 @@ class MemoryService:
                     kind=Kind.FACT,
                     min_similarity=profile.candidate_threshold,
                 )
-                return [hit for hit in hits if hit.memory.id != memory.id][:CANDIDATE_LIMIT]
+                candidates = [hit for hit in hits if hit.memory.id != memory.id][:CANDIDATE_LIMIT]
+                if store.has_memories_without_vector(self._conn, self.workspace_id, space):
+                    # Un hecho guardado sin vector (el servicio estaba caído, o se usó otro
+                    # modelo) solo lo encuentra el texto. Sin esto no se propondría y las dos
+                    # versiones quedarían vigentes.
+                    found = {hit.memory.id for hit in candidates}
+                    by_text = retrieval.search_fts(
+                        self._conn,
+                        self.workspace_id,
+                        memory.content,
+                        k=CANDIDATE_LIMIT,
+                        at_ms=at_ms,
+                        kind=Kind.FACT,
+                        exclude_id=memory.id,
+                    )
+                    candidates += [hit for hit in by_text if hit.memory.id not in found]
+                    warnings.append(_without_vector_warning(self._embedder.model))
+                return candidates
         return retrieval.search_fts(
             self._conn,
             self.workspace_id,
@@ -552,6 +575,14 @@ def _warn_about_flags(result: RecallResult) -> RecallResult:
     if len(warnings) == len(result.warnings):
         return result
     return result.model_copy(update={"warnings": warnings})
+
+
+def _without_vector_warning(model: str) -> str:
+    return tr(
+        "Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para no "
+        "perderlas. Ejecuta `vigente reindex`.",
+        model=model,
+    )
 
 
 def _results(n: int) -> str:

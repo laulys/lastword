@@ -91,6 +91,11 @@ _MIGRATIONS: tuple[str | Callable[[sqlite3.Connection], None], ...] = (
     """,
     # v4: búsqueda en dos pasos (ADR-0010). Se define más abajo: necesita Python.
     lambda conn: _two_stage_vectors(conn),
+    # v5: saber si a alguna memoria le falta el vector del modelo en uso se pregunta en cada
+    # búsqueda y al guardar. Sin índice recorría la tabla: 7 ms con 50.000 memorias.
+    """
+    CREATE INDEX memories_ws_embedding ON memories(workspace_id, embedding_model);
+    """,
 )
 LATEST_SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -711,14 +716,31 @@ def count_without_vector(
     return int(conn.execute(sql, (workspace_id,)).fetchone()[0])
 
 
-def has_memories_without_vector(conn: sqlite3.Connection, workspace_id: str, model: str) -> bool:
-    """¿Alguna memoria sin vector de `model`? (Guardada con el servicio caído, o de otro modelo.)
+def has_memories_without_vector(
+    conn: sqlite3.Connection, workspace_id: str, space: EmbeddingSpace
+) -> bool:
+    """¿Alguna memoria sin vector en `space`? (Guardada con el servicio caído, o con otro modelo.)
 
-    Recorre la tabla si no falta ninguno: 6 ms con 50.000 memorias (eval/results/scale.md).
+    `memories.embedding_model` es el modelo del último vector de cada memoria. Si la base solo
+    tiene un espacio vectorial, basta con esa columna, que tiene índice. Con varios (se cambió de
+    modelo, o el modelo cambió de dimensión) la columna no dice en qué espacios hay vector, y
+    se comprueba en el propio espacio, que es más lento.
     """
+    if _scalar(conn, "SELECT count(*) FROM embedding_spaces") == 1:
+        row = conn.execute(
+            # Tres búsquedas en el índice (workspace_id, embedding_model): un único
+            # `embedding_model IS NOT ?` lo recorrería entero.
+            "SELECT EXISTS (SELECT 1 FROM memories WHERE workspace_id = ?1 "
+            "AND embedding_model IS NULL) "
+            "OR EXISTS (SELECT 1 FROM memories WHERE workspace_id = ?1 AND embedding_model < ?2) "
+            "OR EXISTS (SELECT 1 FROM memories WHERE workspace_id = ?1 AND embedding_model > ?2)",
+            (workspace_id, space.model),
+        ).fetchone()
+        return bool(row[0])
     row = conn.execute(
-        "SELECT 1 FROM memories WHERE workspace_id = ? AND embedding_model IS NOT ? LIMIT 1",
-        (workspace_id, model),
+        f"SELECT 1 FROM memories AS m WHERE m.workspace_id = ? "
+        f"AND NOT EXISTS (SELECT 1 FROM {space.exact} AS x WHERE x.seq = m.seq) LIMIT 1",
+        (workspace_id,),
     ).fetchone()
     return row is not None
 
@@ -815,20 +837,24 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
                 )
             )
     # `memories.embedding_model` es el modelo del último vector calculado. Si dice que hay
-    # vector de un modelo, tiene que existir en el espacio más reciente de ese modelo.
-    latest = {space.model: space for space in embedding_spaces(conn)}
-    for space in latest.values():
+    # vector de un modelo, tiene que existir en alguno de los espacios de ese modelo (puede
+    # haber varios, si el modelo cambió de dimensión).
+    by_model: dict[str, list[EmbeddingSpace]] = {}
+    for space in embedding_spaces(conn):
+        by_model.setdefault(space.model, []).append(space)
+    for model, spaces in by_model.items():
+        missing_in_all = " ".join(
+            f"AND seq NOT IN (SELECT seq FROM {space.exact})" for space in spaces
+        )
         (claimed,) = conn.execute(
-            f"SELECT count(*) FROM memories WHERE embedding_model = ? "
-            f"AND seq NOT IN (SELECT seq FROM {space.exact})",
-            (space.model,),
+            f"SELECT count(*) FROM memories WHERE embedding_model = ? {missing_in_all}", (model,)
         ).fetchone()
         if claimed:
             problems.append(
                 tr(
                     "{n} memorias dicen tener vector de {model} y no lo tienen",
                     n=claimed,
-                    model=space.model,
+                    model=model,
                 )
             )
     return problems

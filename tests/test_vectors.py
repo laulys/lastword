@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import struct
+from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 from tests.fakes import DATABASE_WORDS, FailingEmbedder, FakeEmbedder, FixedEmbedder
 from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
 from vigente import store
+from vigente.embeddings import Purpose
 from vigente.errors import ConfigError, NotSupersedableError
 from vigente.models import (
     Hit,
@@ -382,3 +384,78 @@ def test_a_stored_null_vector_does_not_break_search(
     luis = remember(healthy, "Luis vive en Valencia")
     assert recall_ids(healthy, "dónde vive Luis") == [luis.id]
     assert healthy.doctor() == []
+
+
+class TestSeveralModels:
+    """Lo que pasa cuando no todas las memorias tienen vector del modelo en uso."""
+
+    def test_a_fact_saved_without_vector_is_still_proposed(
+        self, conn: sqlite3.Connection, clock: FakeClock, embedder: FakeEmbedder
+    ) -> None:
+        """Guardado con el servicio caído, solo lo encuentra el texto. Sin proponerlo, la
+        versión vieja y la nueva quedarían vigentes."""
+        old = remember(MemoryService(conn, "test", clock=clock), "El proyecto usa PostgreSQL 15")
+        semantic = MemoryService(conn, "test", clock=clock, embedder=embedder)
+        result = semantic.remember(NewMemory(content="El proyecto usa PostgreSQL 16"))
+        assert [hit.memory.id for hit in result.possible_supersedes] == [old.id]
+        assert any("vigente reindex" in warning for warning in result.warnings)
+
+    def test_going_back_to_a_previous_model_keeps_vector_search(
+        self, conn: sqlite3.Connection, clock: FakeClock
+    ) -> None:
+        first = MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(model="a"))
+        ana = remember(first, "Ana vive en Madrid")
+        assert (
+            MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(model="b"))
+            .reindex()
+            .embedded
+            == 1
+        )
+        result = first.recall(RecallQuery(query="Ana Madrid"))
+        assert (result.mode, result.warnings) == ("vector", [])
+        assert [hit.memory.id for hit in result.results] == [ana.id]
+
+    def test_a_model_that_changes_dimension_warns_and_reindex_fixes_it(
+        self, conn: sqlite3.Connection, clock: FakeClock
+    ) -> None:
+        small = MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(dim=64))
+        ana = remember(small, "Ana vive en Madrid")
+        large = MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(dim=128))
+        remember(large, "Luis trabaja en Valencia")
+        degraded = large.recall(RecallQuery(query="Ana Madrid"))
+        assert degraded.mode == "hybrid"  # Ana no tiene vector de 128 dimensiones: la da el texto
+        assert ana.id in [hit.memory.id for hit in degraded.results]
+        assert large.doctor() == []
+
+        assert large.reindex().embedded == 1
+        assert large.recall(RecallQuery(query="Ana Madrid")).mode == "vector"
+        # De vuelta en la dimensión anterior, a Luis le falta ese vector: reindex lo calcula.
+        assert small.reindex().model_dump() == {"model": "fake-embedder", "dim": 64, "embedded": 1}
+        assert small.recall(RecallQuery(query="Luis Valencia")).mode == "vector"
+
+    def test_reindex_never_gives_a_forgotten_vector_to_another_memory(
+        self, db_path: Path, clock: FakeClock
+    ) -> None:
+        """Mientras reindex espera al modelo, otro cliente olvida la memoria más reciente y
+        guarda otra, que hereda su número de fila."""
+        other = MemoryService.open(db_path, "test", clock=clock)
+        forgotten = remember(other, "Ana tiene diabetes tipo uno")
+
+        class DuringEmbedding(FakeEmbedder):
+            pending: bool = True
+
+            def embed(self, texts: Sequence[str], purpose: Purpose) -> list[list[float]]:
+                if self.pending:
+                    self.pending = False
+                    other.forget(forgotten.id)
+                    remember(other, "El gato se llama Michi")
+                return super().embed(texts, purpose)
+
+        reindexing = MemoryService.open(db_path, "test", clock=clock, embedder=DuringEmbedding())
+        assert reindexing.reindex().embedded == 1  # el gato, con su propio vector
+        (hit,) = reindexing.recall(RecallQuery(query="El gato se llama Michi")).results
+        assert hit.similarity == pytest.approx(1.0)
+        leaked = reindexing.recall(RecallQuery(query="Ana tiene diabetes tipo uno")).results
+        assert all((hit.similarity or 0.0) < 0.5 for hit in leaked)
+        other.close()
+        reindexing.close()
