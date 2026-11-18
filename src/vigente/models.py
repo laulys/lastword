@@ -220,6 +220,6 @@ def describe_validation_error(exc: ValidationError) -> str:
     memoria y acabar en logs."""
     parts = []
     for error in exc.errors():
-        location = ".".join(str(part) for part in error["loc"]) or "entrada"
+        location = ".".join(str(part) for part in error["loc"]) or tr("entrada")
         parts.append(f"{location}: {error['msg']}")
     return "; ".join(parts)

@@ -31,6 +31,7 @@ from vigente import __version__
 from vigente.config import Settings
 from vigente.embeddings import Embedder
 from vigente.errors import VigenteError
+from vigente.i18n import tr
 from vigente.models import (
     MAX_K,
     MAX_LIST_LIMIT,
@@ -434,7 +435,9 @@ def create_http_app(
 ) -> ASGIApp:
     """El servidor MCP por streamable HTTP, en /mcp, protegido con un token."""
     if len(token) < MIN_TOKEN_CHARS:
-        raise ValueError(f"{TOKEN_ENV} necesita al menos {MIN_TOKEN_CHARS} caracteres")
+        raise ValueError(
+            tr("{env} necesita al menos {n} caracteres", env=TOKEN_ENV, n=MIN_TOKEN_CHARS)
+        )
     server = create_server(settings, embedder=embedder, clock=clock)
     # En localhost se mantiene la protección del SDK contra DNS rebinding (solo acepta Host
     # locales). Fuera, ese filtro rechazaría a los propios clientes: protege el token.
@@ -450,24 +453,30 @@ def create_http_app(
 def main(argv: list[str] | None = None) -> None:
     """Punto de entrada `vigente-mcp`. Configuración por variables de entorno (ver README)."""
     parser = argparse.ArgumentParser(
-        prog="vigente-mcp", description="Servidor MCP de Vigente. Por defecto, por stdio."
+        prog="vigente-mcp", description=tr("Servidor MCP de Vigente. Por defecto, por stdio.")
     )
     parser.add_argument(
-        "--http", action="store_true", help=f"Servir por HTTP en /mcp. Exige {TOKEN_ENV}."
+        "--http",
+        action="store_true",
+        help=tr("Servir por HTTP en /mcp. Exige {env}.", env=TOKEN_ENV),
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Con --http: dirección de escucha.")
-    parser.add_argument("--port", type=int, default=8765, help="Con --http: puerto.")
+    parser.add_argument("--host", default="127.0.0.1", help=tr("Con --http: dirección de escucha."))
+    parser.add_argument("--port", type=int, default=8765, help=tr("Con --http: puerto."))
     args = parser.parse_args(argv)
     token = os.environ.get(TOKEN_ENV, "")
     if args.http and len(token) < MIN_TOKEN_CHARS:
         sys.exit(
-            f"vigente-mcp: para servir por HTTP hace falta {TOKEN_ENV} con al menos "
-            f"{MIN_TOKEN_CHARS} caracteres (por ejemplo, la salida de `openssl rand -hex 32`)."
+            tr(
+                "vigente-mcp: para servir por HTTP hace falta {env} con al menos {n} caracteres "
+                "(por ejemplo, la salida de `openssl rand -hex 32`).",
+                env=TOKEN_ENV,
+                n=MIN_TOKEN_CHARS,
+            )
         )
     try:
         settings = Settings.from_env()
     except ValueError as exc:  # p. ej. un VIGENTE_SEARCH_MODE que no existe
-        sys.exit(f"vigente-mcp: configuración no válida: {exc}")
+        sys.exit(tr("vigente-mcp: configuración no válida: {error}", error=exc))
     try:
         embedder = settings.embedding.build()
         # Fallar al arrancar, con un mensaje claro, si la base o el workspace no sirven.
@@ -475,15 +484,18 @@ def main(argv: list[str] | None = None) -> None:
     except VigenteError as exc:
         sys.exit(f"vigente-mcp: {exc.code}: {exc.message}")
     except ValidationError as exc:
-        sys.exit(f"vigente-mcp: configuración no válida: {describe_validation_error(exc)}")
+        error = describe_validation_error(exc)
+        sys.exit(tr("vigente-mcp: configuración no válida: {error}", error=error))
     try:
         if not args.http:
             create_server(settings, embedder=embedder).run("stdio")
             return
         if args.host not in LOOPBACK:
             print(
-                "vigente-mcp: escuchando fuera de este ordenador. Ponlo detrás de HTTPS: sin "
-                "cifrado, el token viaja en claro.",
+                tr(
+                    "vigente-mcp: escuchando fuera de este ordenador. Ponlo detrás de HTTPS: "
+                    "sin cifrado, el token viaja en claro."
+                ),
                 file=sys.stderr,
             )
         app = create_http_app(settings, token=token, embedder=embedder, host=args.host)

@@ -1,4 +1,5 @@
-"""Idioma de lo que lee una persona: la CLI, los errores, los avisos y `vigente doctor`.
+"""Idioma de lo que lee una persona: la CLI, los errores, los avisos, `vigente doctor` y el
+arranque de `vigente-mcp`.
 
 El texto fuente está en español y `EN` da su versión en inglés. El idioma sale de
 `VIGENTE_LANG` (`es` o `en`) y, si no está, del idioma del sistema (`LC_ALL`, `LC_MESSAGES`,
@@ -121,6 +122,15 @@ EN: dict[str, str] = {
     "con new_id, la vigencia y los demás datos son los de esa memoria": "with new_id, the validity and the other data are those of that memory",
     "old_id y also_old_ids no pueden repetir hechos": "old_id and also_old_ids cannot repeat facts",
     "include_history y as_of no se pueden combinar": "include_history and as_of cannot be combined",
+    "entrada": "input",
+    "{env} necesita al menos {n} caracteres": "{env} needs at least {n} characters",
+    "Servidor MCP de Vigente. Por defecto, por stdio.": "Vigente's MCP server. By default, over stdio.",
+    "Servir por HTTP en /mcp. Exige {env}.": "Serve over HTTP at /mcp. Requires {env}.",
+    "Con --http: dirección de escucha.": "With --http: address to listen on.",
+    "Con --http: puerto.": "With --http: port.",
+    "vigente-mcp: para servir por HTTP hace falta {env} con al menos {n} caracteres (por ejemplo, la salida de `openssl rand -hex 32`).": "vigente-mcp: serving over HTTP needs {env} with at least {n} characters (for example, the output of `openssl rand -hex 32`).",
+    "vigente-mcp: configuración no válida: {error}": "vigente-mcp: invalid configuration: {error}",
+    "vigente-mcp: escuchando fuera de este ordenador. Ponlo detrás de HTTPS: sin cifrado, el token viaja en claro.": "vigente-mcp: listening beyond this computer. Put it behind HTTPS: without encryption, the token travels in clear text.",
     "No se guardó: el texto contiene {what}, que pueden esconder instrucciones. Quítalos y vuelve a intentarlo.": "Not saved: the text contains {what}, which can hide instructions. Remove them and try again.",
     "No se guardó: parece contener {what}. Guarda dónde está el secreto (por ejemplo, «la clave de Stripe está en el gestor de contraseñas»), no el secreto.": "Not saved: it seems to contain {what}. Save where the secret is (for example, \u201cthe Stripe key is in the password manager\u201d), not the secret.",
     " y ": " and ",

@@ -53,7 +53,7 @@ Los puntos 4 y 5 determinan reglas del diseño (ver §4 y ADR-0001).
 - `Embedder` es la única interfaz abstracta. Tiene dos implementaciones reales: la compatible con OpenAI y `FakeEmbedder` para tests.
 - *(Hito 2)* Cada familia de modelos tiene un `ModelProfile`: el formato de entrada que espera según el uso (documento guardado, pregunta, comparación) y sus umbrales calibrados. Si no se respeta el formato, la calidad cae sin dar ningún error.
 - *(Hito 2)* Los embeddings se calculan **fuera** de las transacciones: son llamadas de red y no deben bloquear la base de datos.
-- *(v1.2)* Lo que lee una persona (la CLI, los errores, los avisos y `vigente doctor`) pasa por `tr()` de `i18n.py`: el texto fuente está en español y hay un catálogo en inglés. El idioma sale de `VIGENTE_LANG` o del sistema. Lo que lee el agente (instrucciones y descripciones MCP) se queda en español. Un test comprueba que cada texto tiene traducción con los mismos huecos.
+- *(v1.2)* Lo que lee una persona (la CLI, los errores, los avisos, `vigente doctor` y el arranque de `vigente-mcp`) pasa por `tr()` de `i18n.py`: el texto fuente está en español y hay un catálogo en inglés. El idioma sale de `VIGENTE_LANG` o del sistema. Lo que lee el agente (instrucciones y descripciones MCP) se queda en español. Un test comprueba que cada texto tiene traducción con los mismos huecos.
 
 ## 4. Esquema SQL
 

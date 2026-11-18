@@ -135,7 +135,7 @@ bearer_token_env_var = "VIGENTE_TOKEN"
 | `VIGENTE_ALLOW_REMOTE` | desactivado | Necesario para enviar memorias a un servicio no local |
 | `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectores + texto) o `text` |
 | `VIGENTE_TOKEN` | | Necesario con `vigente-mcp --http`: los clientes lo envían como *bearer token* |
-| `VIGENTE_LANG` | idioma del sistema | `es` o `en`: idioma de la CLI, sus errores y `vigente doctor` |
+| `VIGENTE_LANG` | idioma del sistema | `es` o `en`: idioma de lo que lee una persona en `vigente` y `vigente-mcp` |
 
 Si el servicio de embeddings no responde, Vigente sigue funcionando con búsqueda de texto y lo avisa. `vigente reindex` calcula después los vectores pendientes.
 
