@@ -63,7 +63,7 @@ Convenciones:
 - IDs ULID: ordenables por tiempo y legibles.
 - Migraciones con `PRAGMA user_version`.
 - Conexión con `autocommit=True` (Python ≥ 3.12) y `BEGIN IMMEDIATE` explícito en cada escritura.
-- `journal_mode=WAL` y `busy_timeout`, porque el servidor MCP y la CLI pueden abrir el mismo archivo a la vez.
+- `journal_mode=WAL` y `busy_timeout`, porque el servidor MCP y la CLI pueden abrir el mismo archivo a la vez. *(v1.0.1)* SQLite no aplica `busy_timeout` al paso a WAL: si varios servidores creaban la base a la vez, alguno fallaba al arrancar. Ese paso se reintenta dentro del mismo plazo.
 - `secure_delete=ON`: SQLite sobrescribe con ceros lo que borra, en vez de dejarlo en páginas libres. *(Hito 1)*
 
 ```sql
@@ -261,7 +261,7 @@ Lo que sigue de esta sección es el plan original.
 | Mezcla de español e inglés | `unicode61` sin stemming; modelo de embeddings multilingüe |
 | El agente puede no llamar a `supersede` | Descripciones claras de las herramientas; se mide en E2b; se documenta como limitación |
 | KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crece de forma lineal. `recall` tarda 1,5 ms con 1.000 memorias, 13 ms con 10.000 y 62 ms con 50.000, sin contar el modelo; la base ocupa 191 MB con 50.000. Para cientos de miles habría que pasar a vectores cuantizados o a un índice aproximado ([escala](../eval/results/scale.md)) |
-| CLI y servidor MCP sobre el mismo archivo | WAL + `busy_timeout` |
+| Varios clientes (CLI, Claude Code, Codex, Cursor) sobre el mismo archivo | WAL + `busy_timeout`. *(v1.0.1)* Al crear la base a la vez fallaba el 57% de las aperturas; el paso a WAL se reintenta y un test lo comprueba con cuatro procesos. Probado también con tres servidores MCP escribiendo a la vez |
 | Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `vigente reindex` completa lo pendiente |
 | Enviar memorias a un servicio remoto sin querer *(Hito 2)* | Toda URL no local se rechaza salvo con `VIGENTE_ALLOW_REMOTE=1`; la clave de API solo llega por entorno |
 | Umbral de reemplazos frágil *(Hito 2)* | Calibrado con solo 18 casos y margen estrecho (ADR-0004). *(Hito 4)* Recalibrado con E1 y validado aparte: se mantiene 0.51, porque el umbral calibrado con plantillas no generalizaba |

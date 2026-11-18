@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from vigente.errors import ConfigError, SchemaVersionError
 from vigente.models import Kind, Memory, Status
 
 OPEN_END_MS = 253_402_300_799_999  # 9999-12-31T23:59:59.999Z
+BUSY_TIMEOUT_MS = 5000  # cuánto espera una conexión a que otra suelte la base
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _ONE_MS = timedelta(milliseconds=1)
 
@@ -143,16 +145,37 @@ def connect(path: str | Path) -> sqlite3.Connection:
     try:
         _load_sqlite_vec(conn)
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA secure_delete = ON")  # lo borrado se sobrescribe con ceros
         if not in_memory:
-            conn.execute("PRAGMA journal_mode = WAL")
+            _enable_wal(conn)
             conn.execute("PRAGMA synchronous = NORMAL")
         migrate(conn)
     except BaseException:
         conn.close()
         raise
     return conn
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Activa WAL, reintentando mientras otro proceso tenga la base bloqueada.
+
+    Cuando varios clientes arrancan a la vez su servidor sobre una base nueva, todos
+    intentan pasarla a WAL. SQLite no aplica `busy_timeout` a ese cambio y responde
+    «database is locked» al momento, así que aquí se espera con el mismo plazo.
+    """
+    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    pause = 0.005
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            busy = exc.sqlite_errorcode & 0xFF == sqlite3.SQLITE_BUSY
+            if not busy or time.monotonic() >= deadline:
+                raise
+        time.sleep(pause)
+        pause = min(pause * 2, 0.1)
 
 
 @contextmanager
