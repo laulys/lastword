@@ -40,3 +40,11 @@ class InvalidValidityError(VigenteError):
 
 class SchemaVersionError(VigenteError):
     code = "schema_version"
+
+
+class ConfigError(VigenteError):
+    code = "config"
+
+
+class EmbeddingError(VigenteError):
+    code = "embedding_unavailable"
