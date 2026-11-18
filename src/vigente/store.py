@@ -361,7 +361,10 @@ def fts_search(
     """
     sql = [
         f"SELECT {_M_COLUMNS}, bm25(memories_fts, 1.0, 0.5) AS rank",
-        "FROM memories_fts JOIN memories AS m ON m.seq = memories_fts.rowid",
+        # CROSS JOIN obliga a recorrer primero el índice FTS. Con un JOIN normal, SQLite puede
+        # elegir recorrer `memories` por su índice y ejecutar la búsqueda de texto una vez por
+        # fila: coste cuadrático (432 ms frente a 1,9 ms con 2.000 memorias; ver eval/scale.py).
+        "FROM memories_fts CROSS JOIN memories AS m ON m.seq = memories_fts.rowid",
         "WHERE memories_fts MATCH ? AND m.workspace_id = ?",
     ]
     params: list[Any] = [match, workspace_id]
