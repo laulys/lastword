@@ -30,8 +30,9 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 
 - **Reordenar por lo más reciente no basta.** Elimina los obsoletos, pero entonces el primer resultado es otro dato en la mitad de las preguntas (51%).
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 preguntas de un benchmark público: sin reemplazos, la versión vieja de un dato actualizado sale antes que la nueva en el **54–56%** de los casos, con cualquier modo de búsqueda.
-- **[Escala](eval/results/scale.md):** con 50.000 memorias, una búsqueda tarda 62 ms y un borrado completo 52 ms, más unos 15 ms del modelo de embeddings.
+- **[Escala](eval/results/scale.md):** con 200.000 memorias, una búsqueda tarda 37 ms y guardar un hecho 4 ms (8,5 ms y 1,3 ms con 50.000). La búsqueda compara primero vectores comprimidos a 1 bit y reordena los 100 mejores con los exactos, con los mismos resultados que una búsqueda exacta en E1 y E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Hay que sumar unos 15 ms del modelo de embeddings.
 - **[Un agente real](eval/results/agent_demo.md)** (Claude Code, cuatro sesiones independientes que solo comparten Vigente) sigue el protocolo por su cuenta: busca antes de guardar, enlaza los cambios sin duplicar hechos y responde con lo vigente.
+- **[Códigos exactos](eval/results/e4_exact.md):** la búsqueda por vectores ya devuelve primero la memoria correcta en 36 de 36 preguntas que dependen de un código (el error E-4031 frente al E-4013, el pedido 7781 frente al 7718); la de texto sola acierta 34. Por eso no se añadió ningún modo especial.
 - **[Seguridad](eval/results/e3_security.md):** los filtros detectan 40 de 40 secretos sin ningún falso aviso en 40 frases parecidas (números de pedido, hashes, «la clave está en 1Password»), y marcan 40 de 40 órdenes incrustadas frente a 1 de 40 memorias legítimas. Los casos y las reglas los escribió la misma persona: es un techo.
 
 Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.md)), y E1 y E2 dan resultados idénticos al repetirlos.
@@ -39,11 +40,11 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 ## Cómo funciona
 
 - **Un solo archivo.** SQLite guarda las filas, un índice de texto (FTS5) y un índice vectorial (sqlite-vec). Cada escritura o borrado es una sola transacción sobre los tres.
-- **Los hechos nunca se editan.** `supersede` crea la versión nueva, cierra la anterior y las enlaza. «Verdad en el instante t» significa `valid_from <= t < valid_to`.
-- **El motor no llama a ningún LLM.** `remember` usa embeddings locales (embeddinggemma con Ollama) para proponer hechos que lo nuevo podría reemplazar. Decide el agente, que ya es un LLM.
+- **Los hechos nunca se editan.** `supersede` crea la versión nueva, cierra la anterior y las enlaza. «Verdad en el instante t» significa `valid_from <= t < valid_to`. Un hecho nuevo puede reemplazar a varios: «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos ([ADR-0008](docs/decisions/0008-un-hecho-reemplaza-a-varios.md)).
+- **El motor no llama a ningún LLM.** `remember` usa embeddings locales (embeddinggemma con Ollama) para proponer hechos que lo nuevo podría reemplazar. Decide el agente, que ya es un LLM. Las propuestas priorizan no perder ningún reemplazo (17 de 18 en el conjunto escrito a mano), así que las frases del mismo tema también reciben una: la similitud no distingue «esto actualiza aquello» de «esto añade un detalle», y [tapar nombres y cifras no ayudó](docs/decisions/0004-modelo-de-embeddings.md).
 - **Olvidar es borrar de verdad.** `forget` borra todas las versiones de un hecho de las filas, de los dos índices y del disco. Un test comprueba que los bytes desaparecen del archivo.
 - **Si algo falla, sigue funcionando.** Sin embeddings, busca por texto. Se niega a enviar memorias a un servicio que no sea local salvo que lo permitas.
-- **Se puede compartir entre agentes con seguridad.** Rechaza al guardar los secretos y los caracteres Unicode invisibles que pueden esconder instrucciones. El texto que suena a orden para el agente se guarda marcado: `recall` avisa al agente y `vigente review` lo lista ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
+- **Se puede compartir entre agentes con seguridad.** Rechaza al guardar los secretos y los caracteres Unicode invisibles que pueden esconder instrucciones. El texto que suena a orden para el agente se guarda marcado: `recall` avisa al agente y `vigente review` lo lista ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)). Son reglas, en español e inglés: cazan lo evidente, y por eso además se le dice al agente que trate cada memoria como un dato, nunca como una orden.
 
 ## Probarlo
 
@@ -90,12 +91,35 @@ codex mcp add vigente --env VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /rut
 |---|---|
 | `remember` | Guarda un hecho o un episodio y propone hechos vigentes que podría reemplazar. Rechaza secretos |
 | `recall` | Busca lo que es verdad ahora, o en una fecha pasada (`as_of`) |
-| `supersede` | Cierra un hecho obsoleto y enlaza su versión nueva (texto nuevo, o el id que acaba de devolver `remember`) |
+| `supersede` | Cierra uno o varios hechos obsoletos y enlaza su versión nueva (texto nuevo, o el id que acaba de devolver `remember`) |
 | `history` | Todas las versiones de un hecho |
 | `list_memories` | Lista memorias con filtros |
 | `forget` | Borra un hecho y todas sus versiones, también del disco (marcada como destructiva) |
 
 El workspace lo fija la configuración del servidor, así que un agente no puede leer otro. Los clientes configurados con el mismo workspace comparten la memoria, incluso a la vez: lo que guarda Claude Code lo encuentran Codex y Cursor.
+
+### Compartirla entre ordenadores
+
+`vigente-mcp --http` sirve la misma memoria por HTTP, para que la compartan otros ordenadores, un equipo o un agente en la nube. Exige un token y, fuera de `localhost`, conviene ponerlo detrás de HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
+
+```bash
+export VIGENTE_TOKEN=$(openssl rand -hex 32)
+VIGENTE_WORKSPACE=equipo uv run vigente-mcp --http --host 0.0.0.0 --port 8765
+```
+
+Claude Code:
+
+```bash
+claude mcp add --transport http vigente https://memoria.example.com/mcp --header "Authorization: Bearer $VIGENTE_TOKEN"
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.vigente]
+url = "https://memoria.example.com/mcp"
+bearer_token_env_var = "VIGENTE_TOKEN"
+```
 
 > **Si tu cliente tiene memoria propia**, el agente puede guardar lo mismo en los dos sitios, y solo Vigente sabrá cuándo deja de ser verdad. En Claude Code puedes desactivar su memoria automática con `"autoMemoryEnabled": false` en la configuración del proyecto, o con `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ([documentación](https://code.claude.com/docs/en/memory)).
 
@@ -110,6 +134,8 @@ El workspace lo fija la configuración del servidor, así que un agente no puede
 | `VIGENTE_EMBED_API_KEY` | | Solo si el servicio la pide |
 | `VIGENTE_ALLOW_REMOTE` | desactivado | Necesario para enviar memorias a un servicio no local |
 | `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectores + texto) o `text` |
+| `VIGENTE_TOKEN` | | Necesario con `vigente-mcp --http`: los clientes lo envían como *bearer token* |
+| `VIGENTE_LANG` | idioma del sistema | `es` o `en`: idioma de la CLI, sus errores y `vigente doctor` |
 
 Si el servicio de embeddings no responde, Vigente sigue funcionando con búsqueda de texto y lo avisa. `vigente reindex` calcula después los vectores pendientes.
 
@@ -124,17 +150,11 @@ Cada decisión tiene un ADR con las alternativas que se consideraron:
 5. [`supersede` puede enlazar una memoria ya guardada](docs/decisions/0005-dos-formas-de-reemplazar.md)
 6. [Búsqueda por vectores por defecto, decidida con la evaluación](docs/decisions/0006-busqueda-por-vectores.md)
 7. [Lo que no entra en la memoria y lo que entra marcado](docs/decisions/0007-seguridad-de-la-memoria.md)
+8. [Un hecho nuevo puede reemplazar a varios](docs/decisions/0008-un-hecho-reemplaza-a-varios.md)
+9. [Compartir entre ordenadores: HTTP con token](docs/decisions/0009-compartir-por-http.md)
+10. [Búsqueda en dos pasos: vectores binarios y reordenación exacta](docs/decisions/0010-busqueda-en-dos-pasos.md)
 
 El diseño completo está en [docs/architecture.md](docs/architecture.md).
-
-## Limitaciones
-
-- **Las propuestas de reemplazo tienen ruido.** La similitud no distingue «esto actualiza aquello» de «esto añade información sobre lo mismo», así que las frases del mismo tema también reciben propuestas. Por eso decide el agente.
-- **Las cadenas son lineales:** una versión nueva reemplaza a un solo hecho. «Ana y Luis se mudaron a Lisboa» no puede cerrar dos hechos a la vez.
-- **La búsqueda es exacta (KNN por fuerza bruta).** Su coste crece de forma lineal. Con cientos de miles de memorias harían falta vectores cuantizados o un índice aproximado.
-- **Los filtros de seguridad son reglas.** Cazan lo evidente, no a un atacante que las conozca, y el detector de órdenes solo cubre español e inglés.
-- **La memoria es local.** La comparten los clientes del mismo ordenador; los agentes en la nube y tus compañeros no llegan a ella.
-- **La evaluación tiene puntos ciegos.** Hay pocas consultas de coincidencia exacta (códigos de error, identificadores), que es donde la búsqueda por texto suele aportar, y el conjunto sintético sale de plantillas.
 
 ## Trabajo relacionado
 
@@ -158,7 +178,7 @@ uv run mypy src tests eval demo
 
 Cómo repetir toda la evaluación: [eval/README.md](eval/README.md).
 
-El proyecto se construyó en cinco hitos (diseño, núcleo, búsqueda semántica, servidor MCP y evaluación), cada uno con sus decisiones en un ADR. Desde el servidor MCP, cada hito entró por un [pull request](https://github.com/laulys/vigente/pulls?q=is%3Apr) con sus decisiones y mediciones.
+El proyecto se construyó por hitos (diseño, núcleo, búsqueda semántica, servidor MCP, evaluación y seguridad), cada uno con sus decisiones en un ADR. Desde el servidor MCP, cada cambio entró por un [pull request](https://github.com/laulys/vigente/pulls?q=is%3Apr) con sus decisiones y mediciones.
 
 ## Licencia
 
