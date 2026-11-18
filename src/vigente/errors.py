@@ -15,6 +15,11 @@ class VigenteError(Exception):
         self.message = message
         self.current_id = current_id
 
+    def describe(self) -> str:
+        """`código: mensaje (current_id: …)`: formato de texto para agentes y logs."""
+        text = f"{self.code}: {self.message}"
+        return text if self.current_id is None else f"{text} (current_id: {self.current_id})"
+
     def to_dict(self) -> dict[str, str]:
         data = {"code": self.code, "message": self.message}
         if self.current_id is not None:
