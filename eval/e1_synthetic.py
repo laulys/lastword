@@ -258,10 +258,10 @@ def main() -> None:
     }
     RESULTS_JSON.parent.mkdir(parents=True, exist_ok=True)
     RESULTS_JSON.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    todas = [results[(system, DEFAULT_MODE, "todas")] for system in SYSTEMS]
+    todas = [results[(system, NEW_DEFAULT_MODE, "todas")] for system in SYSTEMS]
     bar_chart(
         CHART,
-        f"Qué es el primer resultado (búsqueda híbrida, {len(dataset.questions)} preguntas)",
+        f"Qué es el primer resultado (búsqueda por vectores, {len(dataset.questions)} preguntas)",
         list(SYSTEMS),
         {
             "el dato correcto": [r["recall@1"] for r in todas],
