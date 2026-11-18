@@ -218,8 +218,10 @@ async def test_the_workspace_is_fixed_by_configuration(db_path: Path, clock: Fak
 
 
 def _server_env(tmp_path: Path, **overrides: str) -> dict[str, str]:
-    env = {**os.environ, "VIGENTE_DB": str(tmp_path / "stdio.db"), "VIGENTE_EMBED_MODEL": "none"}
-    return env | {"VIGENTE_WORKSPACE": "stdio"} | overrides
+    # Sin las VIGENTE_* de quien ejecuta los tests: su token o su modo de búsqueda no cuentan.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("VIGENTE_")}
+    env |= {"VIGENTE_DB": str(tmp_path / "stdio.db"), "VIGENTE_EMBED_MODEL": "none"}
+    return env | {"VIGENTE_WORKSPACE": "stdio", "VIGENTE_LANG": "es"} | overrides
 
 
 @pytest.mark.anyio

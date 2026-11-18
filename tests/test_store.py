@@ -33,7 +33,7 @@ def test_reconnecting_keeps_the_schema(db_path: Path) -> None:
 
 def _open_each_round(paths: list[str], barrier: Any, errors: Any) -> None:
     for path in paths:
-        barrier.wait()  # todos los procesos abren la misma base nueva en el mismo instante
+        barrier.wait(timeout=60)  # todos abren la misma base nueva en el mismo instante
         try:
             store.connect(path).close()
         except Exception as exc:  # el proceso principal decide si es un fallo
@@ -51,6 +51,8 @@ def test_several_processes_can_create_the_same_database_at_once(tmp_path: Path) 
         worker.start()
     for worker in workers:
         worker.join(timeout=120)
+        if worker.is_alive():  # que un proceso colgado no deje el test esperando para siempre
+            worker.kill()
     found = []
     while not errors.empty():
         found.append(errors.get_nowait())

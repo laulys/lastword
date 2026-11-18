@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import sqlite3
 import struct
 from collections.abc import Sequence
@@ -208,13 +209,20 @@ class TestForgetAndIntegrity:
     def test_forget_erases_vectors_from_disk(
         self, conn: sqlite3.Connection, clock: FakeClock, db_path: Path
     ) -> None:
-        vector = [1.2345678, -9.8765432, 3.1415926, 2.7182818, -1.4142135, 0.5772156]
+        rng = random.Random(5)  # 128 dimensiones: su copia binaria ocupa 16 bytes reconocibles
+        vector = [rng.uniform(-1, 1) for _ in range(128)]
         service = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder(vector))
         memory = remember(service, "Ana vive en Madrid")
         raw = struct.pack(f"{len(vector)}f", *vector)
-        assert raw in disk_bytes(db_path)  # control: el vector estaba en disco
+        bits = bytes(  # su copia de 1 bit por dimensión, la que elige candidatos (ADR-0010)
+            sum(1 << i for i, value in enumerate(vector[start : start + 8]) if value > 0)
+            for start in range(0, len(vector), 8)
+        )
+        assert raw in disk_bytes(db_path)  # control: los dos estaban en disco
+        assert bits in disk_bytes(db_path)
         service.forget(memory.id)
         assert raw not in disk_bytes(db_path)
+        assert bits not in disk_bytes(db_path)
         assert service.doctor() == []
 
     def test_doctor_detects_stale_vector_metadata(
@@ -473,3 +481,34 @@ def test_the_nearest_memory_is_returned_even_with_negative_similarity(
     (hit,) = opposite.recall(RecallQuery(query="algo sin relación")).results
     assert hit.memory.id == ana.id
     assert hit.similarity == pytest.approx(-1.0)
+
+
+def test_filters_apply_before_candidates_are_chosen(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """La búsqueda en dos pasos elige 100 candidatos (ADR-0010). Si los filtros se aplicaran
+    después, 300 memorias idénticas a la buscada, pero de otro workspace, de otro tipo o ya
+    reemplazadas, ocuparían todos los puestos y la buena no saldría."""
+    embedder = FakeEmbedder()
+    text = "La contraseña del wifi de la oficina cambia cada trimestre"
+    other = MemoryService(conn, "otro", clock=clock, embedder=embedder)
+    service = MemoryService(conn, "test", clock=clock, embedder=embedder)
+    for _ in range(120):
+        remember(other, text, valid_from=T0)
+        remember(service, text, kind="episode", valid_from=T0 - timedelta(days=1))
+    for number in range(150):
+        remember(service, f"Dato de relleno número {number} sobre otro asunto", valid_from=T0)
+    outdated = remember(service, text, valid_from=T0)
+    for _ in range(60):
+        clock.advance(minutes=1)
+        outdated = supersede(service, outdated.id, text)
+    current = outdated
+    assert (
+        store.count_without_vector(conn, "test", store.find_embedding_space(conn, embedder.model))
+        == 0
+    )
+
+    hits = service.recall(RecallQuery(query=text, k=3, kind=Kind.FACT)).results
+    assert hits[0].memory.id == current.id
+    assert hits[0].similarity == pytest.approx(1.0)
+    assert all(hit.memory.status.value == "active" for hit in hits)

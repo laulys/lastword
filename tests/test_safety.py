@@ -199,7 +199,7 @@ def test_the_repository_has_no_hidden_characters() -> None:
     """El código no puede llevar lo que la memoria rechaza. Ocurrió al escribir este módulo:
     una herramienta convirtió los escapes \\u202e en el carácter invisible real."""
     root = Path(__file__).resolve().parents[1]
-    paths = [*root.glob("*.md")]
+    paths = [root / "README.md", root / "README.es.md"]  # no las notas sin publicar de la raíz
     for folder in ("src", "tests", "eval", "demo", "docs"):
         paths += [p for p in (root / folder).rglob("*") if p.suffix in {".py", ".md"}]
     offenders = [

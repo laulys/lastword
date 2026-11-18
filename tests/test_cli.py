@@ -137,6 +137,8 @@ def test_search_mode_from_the_environment_ignores_case(
     monkeypatch.setenv("VIGENTE_SEARCH_MODE", " Hybrid ")  # el servidor MCP también lo acepta
     ok(run(db_path, "add", "Ana vive en Madrid"))
     assert ok(run(db_path, "search", "Ana"))["mode"] == "fts_only"  # sin embeddings en los tests
+    monkeypatch.setenv("VIGENTE_SEARCH_MODE", "rapido")  # se lee de verdad: uno que no existe falla
+    assert run(db_path, "search", "Ana").exit_code == 2
 
 
 def test_unknown_search_mode_is_a_clear_usage_error(db_path: Path) -> None:
