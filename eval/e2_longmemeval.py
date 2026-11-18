@@ -89,8 +89,11 @@ def evaluate(item: Item, embedder: Embedder) -> dict[str, Outcome]:
     service = MemoryService(conn, WORKSPACE, clock=Clock(now), embedder=embedder)
     session_of: dict[str, str] = {}
     for turn in item.turns:
+        # LongMemEval es público y E2 mide la búsqueda, no los filtros de seguridad (ADR-0007):
+        # unos pocos mensajes traen tokens en URLs o código, y deben guardarse igual que antes.
         memory = service.remember(
-            NewMemory(content=turn.text, kind=Kind.EPISODE, valid_from=turn.date)
+            NewMemory(content=turn.text, kind=Kind.EPISODE, valid_from=turn.date),
+            allow_secrets=True,
         ).memory
         session_of[memory.id] = turn.session_id
     at_ms = store.to_ms(now)
