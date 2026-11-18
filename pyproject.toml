@@ -1,6 +1,6 @@
 [project]
 name = "vigente"
-version = "1.2.0"
+version = "1.2.1"
 description = "Memoria para agentes de IA que sabe qué sigue siendo verdad."
 readme = "README.md"
 license = "MIT"
