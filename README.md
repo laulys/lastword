@@ -1,10 +1,21 @@
 # Vigente
 
+[![CI](https://github.com/laulys/vigente/actions/workflows/ci.yml/badge.svg)](https://github.com/laulys/vigente/actions/workflows/ci.yml)
+
 Memoria para agentes de IA que sabe qué sigue siendo verdad.
 
 Cuando un hecho cambia, Vigente no lo borra ni lo mezcla con el nuevo: lo marca como reemplazado y guarda la cadena de cambios. Por defecto solo devuelve lo vigente, y también puede responder qué era verdad en una fecha concreta.
 
 > **En construcción.** Hito 2 de 5: núcleo local con SQLite, búsqueda híbrida (texto + vectores) y validez temporal. Próximo: servidor MCP.
+
+## Hoja de ruta
+
+- [x] **Hito 0. Diseño:** arquitectura, esquema y plan de evaluación, con sqlite-vec probado antes de escribir código.
+- [x] **Hito 1. Núcleo:** SQLite + FTS5, reemplazos con validez temporal, borrado verificado en disco y CLI.
+- [x] **Hito 2. Búsqueda semántica:** embeddings locales, índice vectorial, búsqueda híbrida y elección del modelo con un benchmark propio.
+- [ ] **Hito 3. Servidor MCP:** probado con Claude Code y Cursor.
+- [ ] **Hito 4. Evaluación:** datos sintéticos y LongMemEval, con resultados publicados tal como salgan.
+- [ ] **Hito 5. Cierre:** README final y demo.
 
 ## Probarlo
 
@@ -50,3 +61,7 @@ uv run python eval/embedding_choice.py                 # repite el benchmark
 
 - [Arquitectura](docs/architecture.md)
 - [Decisiones (ADRs)](docs/decisions/)
+
+## Licencia
+
+[MIT](LICENSE)
