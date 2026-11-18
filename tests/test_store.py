@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import multiprocessing
 import sqlite3
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,6 +26,33 @@ def test_reconnecting_keeps_the_schema(db_path: Path) -> None:
     conn = store.connect(db_path)
     assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION
     conn.close()
+
+
+def _open_each_round(paths: list[str], barrier: Any, errors: Any) -> None:
+    for path in paths:
+        barrier.wait()  # todos los procesos abren la misma base nueva en el mismo instante
+        try:
+            store.connect(path).close()
+        except Exception as exc:  # el proceso principal decide si es un fallo
+            errors.put(f"{type(exc).__name__}: {exc}")
+
+
+def test_several_processes_can_create_the_same_database_at_once(tmp_path: Path) -> None:
+    """Claude Code, Codex y Cursor lanzan cada uno su servidor: la primera vez, a la vez."""
+    ctx = multiprocessing.get_context("spawn")
+    paths = [str(tmp_path / f"ronda-{i}.db") for i in range(8)]
+    barrier, errors = ctx.Barrier(4), ctx.Queue()
+    args = (paths, barrier, errors)
+    workers = [ctx.Process(target=_open_each_round, args=args) for _ in range(4)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=120)
+    found = []
+    while not errors.empty():
+        found.append(errors.get_nowait())
+    assert found == []
+    assert [worker.exitcode for worker in workers] == [0, 0, 0, 0]
 
 
 def test_refuses_a_schema_newer_than_the_code(db_path: Path) -> None:
