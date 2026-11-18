@@ -85,8 +85,11 @@ class MemoryService:
         self._clock = clock
         self._embedder = embedder
         self.workspace_id: str = _workspace_id.validate_python(workspace_id)
-        with store.transaction(conn):
-            store.ensure_workspace(conn, self.workspace_id, store.to_ms(self._now()))
+        # Solo se escribe si el workspace no existe: así abrir el servicio para leer (por
+        # ejemplo, en cada llamada MCP) no toma el bloqueo de escritura de la base.
+        if not store.workspace_exists(conn, self.workspace_id):
+            with store.transaction(conn):
+                store.ensure_workspace(conn, self.workspace_id, store.to_ms(self._now()))
 
     @classmethod
     def open(
@@ -141,12 +144,16 @@ class MemoryService:
 
     def supersede(self, request: SupersedeRequest) -> SupersedeResult:
         """Reemplaza un hecho vigente por uno nuevo sin editar ni borrar el anterior."""
+        if request.new_id is not None:
+            return self._link(request.old_id, request.new_id, request.reason)
+        assert request.new_content is not None  # lo garantiza SupersedeRequest
+        content = request.new_content
         now = self._now()
         # Validar antes de llamar al servicio de embeddings: una petición que va a fallar no
         # debe esperar a la red. Se vuelve a validar dentro de la transacción por si cambió.
         self._check_supersedable(self._require(request.old_id))
         warnings: list[str] = []
-        vector = self._embed(request.new_content, "document", warnings)
+        vector = self._embed(content, "document", warnings)
         with store.transaction(self._conn):
             old = self._require(request.old_id)
             self._check_supersedable(old)
@@ -164,7 +171,7 @@ class MemoryService:
                 id=new_ulid(store.to_ms(now)),
                 workspace_id=self.workspace_id,
                 kind=Kind.FACT,
-                content=request.new_content,
+                content=content,
                 tags=list(old.tags if request.tags is None else request.tags),
                 source=request.source,
                 confidence=request.confidence,
@@ -186,6 +193,37 @@ class MemoryService:
             return SupersedeResult(
                 new=self._require(new.id), old=self._require(old.id), warnings=warnings
             )
+
+    def _link(self, old_id: str, new_id: str, reason: str | None) -> SupersedeResult:
+        """Enlaza una memoria ya guardada como versión nueva de otra, sin duplicar el hecho."""
+        with store.transaction(self._conn):
+            old = self._require(old_id)
+            new = self._require(new_id)
+            self._check_supersedable(old)
+            if new.kind is not Kind.FACT:
+                raise NotSupersedableError("La versión nueva tiene que ser un fact.")
+            if new.supersedes_id is not None:
+                raise NotSupersedableError(
+                    f"{new.id} ya es la versión nueva de {new.supersedes_id}."
+                )
+            if any(memory.id == old.id for memory in self._chain(new)):
+                raise NotSupersedableError("Ese enlace crearía un ciclo en la cadena de versiones.")
+            if new.valid_from <= old.valid_from:
+                raise InvalidValidityError(
+                    "La versión nueva debe empezar después de que empezara la anterior "
+                    f"({old.valid_from.isoformat()})."
+                )
+            store.set_supersedes(
+                self._conn, self.workspace_id, new.id, supersedes_id=old.id, reason=reason
+            )
+            store.mark_superseded(
+                self._conn,
+                self.workspace_id,
+                old.id,
+                valid_to=new.valid_from,
+                superseded_by_id=new.id,
+            )
+            return SupersedeResult(new=self._require(new.id), old=self._require(old.id))
 
     def forget(self, memory_id: str) -> list[str]:
         """Borra para siempre el hecho y todas sus versiones. Devuelve los ids borrados."""

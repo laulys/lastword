@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from vigente.embeddings import DEFAULT_BASE_URL, OpenAICompatibleEmbedder
 
 DEFAULT_EMBED_MODEL = "embeddinggemma"  # ver ADR-0004
+DEFAULT_DB_PATH = Path("~/.vigente/vigente.db")
+DEFAULT_WORKSPACE = "default"
 _DISABLED = {"", "none", "off", "false", "0"}
 _ENABLED = {"1", "true", "yes", "on"}
 
@@ -47,4 +50,21 @@ class EmbeddingSettings:
             base_url=self.base_url,
             api_key=self.api_key,
             allow_remote=self.allow_remote,
+        )
+
+
+@dataclass(frozen=True)
+class Settings:
+    """Configuración completa: dónde está la memoria, qué workspace y qué embeddings."""
+
+    db_path: Path = DEFAULT_DB_PATH
+    workspace: str = DEFAULT_WORKSPACE
+    embedding: EmbeddingSettings = field(default_factory=lambda: EmbeddingSettings(model=None))
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] = os.environ) -> Settings:
+        return cls(
+            db_path=Path(env.get("VIGENTE_DB") or DEFAULT_DB_PATH).expanduser(),
+            workspace=env.get("VIGENTE_WORKSPACE") or DEFAULT_WORKSPACE,
+            embedding=EmbeddingSettings.from_env(env),
         )

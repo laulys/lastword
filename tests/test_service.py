@@ -17,7 +17,7 @@ from vigente.errors import (
     NotFoundError,
     NotSupersedableError,
 )
-from vigente.models import Kind, ListQuery, NewMemory, Status, SupersedeRequest
+from vigente.models import Kind, ListQuery, NewMemory, RecallQuery, Status, SupersedeRequest
 from vigente.service import MemoryService
 
 
@@ -303,3 +303,85 @@ def test_stats_counts_by_kind_and_status(service: MemoryService, clock: FakeCloc
         "episodes": 1,
         "total": 3,
     }
+
+
+class TestLink:
+    """supersede con new_id: la versión nueva ya estaba guardada (no se duplica el hecho)."""
+
+    def test_links_a_memory_that_is_already_stored(
+        self, service: MemoryService, clock: FakeClock
+    ) -> None:
+        old = remember(service, "El proyecto usa PostgreSQL")
+        clock.advance(days=1)
+        new = remember(service, "Migramos a SQLite")
+        result = service.supersede(SupersedeRequest(old_id=old.id, new_id=new.id, reason="MVP"))
+        assert (result.new.id, result.new.supersedes_id, result.new.supersede_reason) == (
+            new.id,
+            old.id,
+            "MVP",
+        )
+        assert result.old.superseded_by_id == new.id
+        assert result.old.valid_to == new.valid_from
+        assert len(service.list_memories(ListQuery()).items) == 2
+        assert [m.id for m in service.history(old.id)] == [old.id, new.id]
+        assert service.doctor() == []
+
+    def test_rejects_links_that_would_break_the_chain(
+        self, service: MemoryService, clock: FakeClock
+    ) -> None:
+        v1 = remember(service, "Responsable de pagos: Marta")
+        clock.advance(days=1)
+        v2 = supersede(service, v1.id, "Responsable de pagos: Luis")
+        clock.advance(days=1)
+        episode = remember(service, "Reunión con Luis", kind="episode")
+        other = remember(service, "Ana vive en Madrid")
+        cases: list[tuple[str, str, type[Exception]]] = [
+            (v2.id, episode.id, NotSupersedableError),  # la versión nueva debe ser un fact
+            (other.id, other.id, NotSupersedableError),  # consigo misma
+            (other.id, v2.id, NotSupersedableError),  # v2 ya es la versión nueva de v1
+            (v2.id, v1.id, NotSupersedableError),  # ciclo: v1 → v2 → v1
+            (v1.id, other.id, AlreadySupersededError),  # v1 ya fue reemplazada
+        ]
+        for old_id, new_id, expected in cases:
+            with pytest.raises(expected):
+                service.supersede(SupersedeRequest(old_id=old_id, new_id=new_id))
+        assert service.doctor() == []
+
+    def test_the_new_version_must_start_later(
+        self, service: MemoryService, clock: FakeClock
+    ) -> None:
+        earlier = remember(service, "Ana vive en Lisboa")
+        clock.advance(days=1)
+        later = remember(service, "Ana vive en Madrid")
+        with pytest.raises(InvalidValidityError):
+            service.supersede(SupersedeRequest(old_id=later.id, new_id=earlier.id))
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {},
+            {"new_content": "x", "new_id": "01JD0000000000000000000001"},
+            {"new_id": "01JD0000000000000000000001", "valid_from": "2026-01-01"},
+            {"new_id": "01JD0000000000000000000001", "tags": ["a"]},
+        ],
+    )
+    def test_needs_exactly_one_new_version(self, fields: dict[str, Any]) -> None:
+        with pytest.raises(ValidationError):
+            SupersedeRequest.model_validate({"old_id": "01JD0000000000000000000000", **fields})
+
+
+def test_reading_does_not_wait_for_another_writer(db_path: Path, clock: FakeClock) -> None:
+    """El servidor MCP abre el servicio en cada llamada: leer no debe tomar el bloqueo de
+    escritura, o las búsquedas en paralelo esperarían a cualquier escritura en curso."""
+    MemoryService.open(db_path, "test").close()  # el workspace ya existe
+    writer = store.connect(db_path)
+    writer.execute("BEGIN IMMEDIATE")  # otro proceso está escribiendo
+    try:
+        reader = store.connect(db_path)
+        reader.execute("PRAGMA busy_timeout = 50")  # fallaría enseguida si intentara escribir
+        service = MemoryService(reader, "test", clock=clock)
+        assert service.recall(RecallQuery(query="Ana")).results == []
+        service.close()
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()

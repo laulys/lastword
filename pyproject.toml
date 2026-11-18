@@ -11,6 +11,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
+    "mcp>=2.3.0",
     "pydantic>=2",
     "sqlite-vec==0.1.9",
     "typer>=0.29.2",
@@ -18,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 vigente = "vigente.cli:app"
+vigente-mcp = "vigente.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]

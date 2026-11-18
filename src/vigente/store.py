@@ -200,6 +200,11 @@ def checkpoint(conn: sqlite3.Connection) -> None:
 # --- escritura
 
 
+def workspace_exists(conn: sqlite3.Connection, workspace_id: str) -> bool:
+    row = conn.execute("SELECT 1 FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+    return row is not None
+
+
 def ensure_workspace(conn: sqlite3.Connection, workspace_id: str, created_ms: int) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO workspaces (id, created_at) VALUES (?, ?)",
@@ -237,6 +242,24 @@ def insert_memory(conn: sqlite3.Connection, memory: Memory) -> int:
         (seq, memory.content, " ".join(memory.tags)),
     )
     return seq
+
+
+def set_supersedes(
+    conn: sqlite3.Connection,
+    workspace_id: str,
+    memory_id: str,
+    *,
+    supersedes_id: str,
+    reason: str | None,
+) -> None:
+    """Marca una memoria ya guardada como versión nueva de otra."""
+    cursor = conn.execute(
+        "UPDATE memories SET supersedes_id = ?, supersede_reason = ? "
+        "WHERE workspace_id = ? AND id = ? AND supersedes_id IS NULL",
+        (supersedes_id, reason, workspace_id, memory_id),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError(f"No se pudo enlazar {memory_id} como versión nueva de {supersedes_id}")
 
 
 def mark_superseded(

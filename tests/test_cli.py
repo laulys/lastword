@@ -107,3 +107,22 @@ def test_reindex_without_a_model_is_a_config_error(db_path: Path) -> None:
     result = run(db_path, "reindex")
     assert result.exit_code == 1
     assert json.loads(result.stderr)["code"] == "config"
+
+
+def test_supersede_can_link_the_memory_just_added(db_path: Path) -> None:
+    old_id = ok(run(db_path, "add", "El proyecto usa PostgreSQL"))["memory"]["id"]
+    new_id = ok(run(db_path, "add", "Migramos a SQLite"))["memory"]["id"]
+    linked = ok(run(db_path, "supersede", old_id, "--by", new_id))
+    assert linked["new"]["id"] == new_id
+    assert linked["old"]["superseded_by_id"] == new_id
+    assert ok(run(db_path, "stats"))["total"] == 2
+
+
+def test_list_shows_the_state_by_date_not_by_status(db_path: Path) -> None:
+    old_id = ok(run(db_path, "add", "El daily es a las 9:30"))["memory"]["id"]
+    new_id = ok(run(db_path, "add", "El daily es a las 10", "--valid-from", "2099-01-01"))
+    ok(run(db_path, "supersede", old_id, "--by", new_id["memory"]["id"]))
+    listed = run(db_path, "list", as_json=False).stdout
+    assert "vigente" in listed  # 9:30: tiene sucesora, pero sigue vigente hasta 2099
+    assert "futura" in listed
+    assert "reemplazada" not in listed
