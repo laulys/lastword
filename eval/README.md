@@ -1,6 +1,6 @@
 # Evaluación
 
-Todo lo que el proyecto afirma sobre calidad o rendimiento sale de estos scripts. Los resultados se publican tal como salen en [`results/`](results/).
+Las cifras de los README y de las tablas de resultados salen de estos scripts, y se publican tal como salen en [`results/`](results/). Unas pocas mediciones sueltas de los ADR y de la arquitectura se hicieron a mano, sin script en el repositorio, y allí se indica: son orientativas.
 
 ## Protocolo del hito 4
 
@@ -21,7 +21,7 @@ Las reglas de decisión se fijaron **antes** de ejecutar los experimentos y los 
 ### Umbral de posibles reemplazos
 
 - **Calibración:** durante la ingesta de E1 se registran, para cada hecho nuevo, sus 3 candidatos más parecidos con su similitud. Se elige el umbral con **mejor F2**, que pesa el doble no perder un reemplazo, porque un reemplazo perdido deja un dato obsoleto vigente y una propuesta de más solo añade una sugerencia que el agente descarta (ADR-0004).
-- **Validación:** se compara con el umbral actual (0.51) en el conjunto escrito a mano del hito 2, que no se usa para calibrar.
+- **Validación:** se compara con el umbral actual (0.51) en el conjunto escrito a mano del hito 2, que no se usa para calibrar en E1. Ese conjunto es el mismo con el que se eligió 0.51, así que la regla favorece al umbral actual: es una regla conservadora, para no cambiar el umbral por unas frases de plantilla, y no una validación independiente.
 - **Regla:** se adopta el nuevo umbral solo si su F2 en la validación es mayor o igual que el de 0.51.
 
 ### E2. LongMemEval: búsqueda sobre conversaciones reales
@@ -46,7 +46,7 @@ Las reglas de decisión se fijaron **antes** de ejecutar los experimentos y los 
 
 ## Protocolo del hito 6: seguridad (E3)
 
-Las reglas y los casos se fijaron **antes** de escribir los detectores. [`security_cases.py`](security_cases.py) no se usa para ajustarlos: los tests unitarios usan otros ejemplos.
+Las reglas y los casos se fijaron **antes** de escribir los detectores. Pero los escribió la misma persona y con los casos a la vista, y comparten vocabulario con ellos («lista de clientes», «no son fiables»): por eso E3 mide un techo, como se explica más abajo. Los tests unitarios usan otros ejemplos.
 
 ### Qué se mide
 
@@ -54,7 +54,7 @@ Las reglas y los casos se fijaron **antes** de escribir los detectores. [`securi
 
 | Conjunto | Casos | Lo correcto |
 |---|---:|---|
-| Secretos de 13 formatos (AWS, GitHub, OpenAI, Anthropic, Stripe, Slack, Google, clave privada, JWT, URL con contraseña, contraseña en una frase, token genérico) | 40 | detectarlos |
+| Secretos de 13 formatos (AWS, GitHub en sus dos formatos, OpenAI, Anthropic, Stripe, Slack, Google, clave privada, JWT, URL con contraseña, contraseña en una frase, token genérico) | 40 | detectarlos |
 | Frases parecidas sin secreto (pedidos, hashes, UUID, «la clave del éxito…», «la clave está en 1Password») | 40 | no detectar nada |
 | Intentos de que el agente obedezca una memoria (anular reglas, cambiar de rol, ocultar algo al usuario, dictar respuestas, usar herramientas, sacar datos, marcado falso de sistema) | 40 | marcarlos |
 | Memorias legítimas que suenan a orden (preferencias, recordatorios, normas del negocio) | 40 | no marcarlas |
@@ -88,7 +88,7 @@ Las evaluaciones anteriores apenas tenían consultas que dependieran de un códi
 
 La búsqueda por vectores era exacta y su coste crecía de forma lineal ([escala](results/scale.md)). La alternativa: buscar con los vectores comprimidos a 1 bit por dimensión (96 bytes en vez de 3 KB) para elegir candidatos, con los filtros dentro de la búsqueda, y reordenarlos con los vectores exactos.
 
-- **Prueba previa** con los 89.539 mensajes reales de LongMemEval y sus 470 preguntas: reordenando 100 candidatos se recupera el 97,9% del top 10 exacto, y el primer resultado coincide en el 100% de las preguntas. Recorrer los vectores binarios cuesta 5,5 ms; leer los candidatos exactos desde sqlite-vec, 15 ms, y desde una tabla SQLite normal, 0,1 ms. De ahí el diseño: binarios en sqlite-vec y exactos en una tabla normal.
+- **Prueba previa**, hecha a mano con los 89.539 mensajes reales de LongMemEval y sus 470 preguntas: reordenando 100 candidatos se recupera el 97,9% del top 10 exacto, y el primer resultado coincide en el 100% de las preguntas. Recorrer los vectores binarios cuesta 5,5 ms; leer los candidatos exactos desde sqlite-vec, 15 ms, y desde una tabla SQLite normal, 0,1 ms. De ahí el diseño: binarios en sqlite-vec y exactos en una tabla normal.
 - **Regla:** se adopta si **(a)** el MRR de E1 y el de E2 no bajan más de 0.005 y **(b)** con 50.000 memorias, `recall` es al menos un 30% más rápido que la búsqueda exacta (p50 de [`scale.py`](scale.py)). Si no, se queda la exacta.
 
 ## Reproducibilidad

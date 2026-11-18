@@ -53,7 +53,9 @@ def main() -> None:
     per_group: dict[tuple[str, str], list[int | None]] = {}
     at_ms = store.to_ms(NOW)
     for (group, code), vector in zip(questions, vectors, strict=True):
-        text_hits = retrieval.search_fts(conn, WORKSPACE, code.question, k=POOL, at_ms=at_ms)
+        text_hits = retrieval.search_fts(
+            conn, WORKSPACE, code.question, k=POOL, at_ms=at_ms, kind=Kind.FACT
+        )
         vector_hits = retrieval.search_vector(
             conn, space, WORKSPACE, vector, k=POOL, at_ms=at_ms, kind=Kind.FACT
         )

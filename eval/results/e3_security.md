@@ -7,7 +7,7 @@ Generado por `eval/e3_security.py` con los casos de `eval/security_cases.py`, fi
 | Secretos de 13 formatos | detectarlos | 40 de 40 (100%) |
 | Frases parecidas sin secreto | no detectar nada | 0 de 40 (0%) con aviso |
 | Intentos de dar órdenes al agente | marcarlos | 40 de 40 (100%) |
-| Memorias legítimas que suenan a orden | no marcarlas | 1 de 40 (2%) marcadas |
+| Memorias legítimas que suenan a orden | no marcarlas | 1 de 40 (2.5%) marcadas |
 | Caracteres invisibles | rechazarlos o marcarlos | 9 de 9 (100%), 6 rechazados |
 | Texto legítimo con emojis y otros alfabetos | no tocarlo | 0 de 9 (0%) afectados |
 
