@@ -41,6 +41,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
 strict = true
+mypy_path = "eval"  # los scripts de eval/ importan sus módulos hermanos
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]

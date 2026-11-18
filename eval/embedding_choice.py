@@ -20,13 +20,13 @@ import math
 import platform
 import statistics
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
+from metrics import cosine, rank_metrics
 
 from vigente import retrieval, store
 from vigente.embeddings import OpenAICompatibleEmbedder, Purpose
@@ -41,11 +41,6 @@ OLLAMA = "http://localhost:11434"
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 TOP = 3  # posibles reemplazos que se muestran (CANDIDATE_LIMIT en el servicio)
 THRESHOLDS = [round(0.30 + 0.01 * i, 2) for i in range(66)]  # 0.30 … 0.95
-
-
-def cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    return dot / (math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b)))
 
 
 @dataclass(frozen=True)
@@ -89,16 +84,6 @@ def score_candidates(
 def best(scores: list[CandidateScore]) -> CandidateScore:
     # Mejor F1; a igualdad, el umbral más alto (menos ruido para el agente).
     return max(scores, key=lambda s: (round(s.f1, 6), s.threshold))
-
-
-def rank_metrics(ranks: list[int | None]) -> dict[str, float]:
-    """`ranks`: posición (1 = primera) de la respuesta correcta, o None si no apareció."""
-    n = len(ranks)
-    return {
-        "recall@1": sum(r == 1 for r in ranks) / n,
-        "recall@3": sum(r is not None and r <= 3 for r in ranks) / n,
-        "mrr": sum(1 / r for r in ranks if r is not None) / n,
-    }
 
 
 def rank_of(contents: list[str], expected: str) -> int | None:
@@ -177,7 +162,7 @@ def evaluate(model: str, data: dict[str, Any]) -> dict[str, Any]:
         "model": model,
         "dim": space.dim,
         "candidates": candidates,
-        "search": {name: rank_metrics(r) for name, r in ranks.items()},
+        "search": {name: rank_metrics(r, ks=(1, 3)) for name, r in ranks.items()},
         "answerable_top_sim": (min(top_similarity), statistics.mean(top_similarity)),
         "unanswerable_top_sim": (
             statistics.mean(unanswerable_similarity),
