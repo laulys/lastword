@@ -1,102 +1,155 @@
 # Vigente
 
 [![CI](https://github.com/laulys/vigente/actions/workflows/ci.yml/badge.svg)](https://github.com/laulys/vigente/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)
 
-Memoria para agentes de IA que sabe qué sigue siendo verdad.
+**Memory for AI agents that knows what is still true.** · [Leer en español](README.es.md)
 
-Cuando un hecho cambia, Vigente no lo borra ni lo mezcla con el nuevo: lo marca como reemplazado y guarda la cadena de cambios. Por defecto solo devuelve lo vigente, y también puede responder qué era verdad en una fecha concreta.
+When a fact changes, most agent memories either overwrite it or keep both versions and hope that search picks the right one. Vigente does neither. The old fact is **superseded**: closed with a date and linked to its replacement.
 
-> **En construcción.** Hito 4 de 5: servidor MCP sobre un núcleo local con SQLite, búsqueda por significado y validez temporal, evaluado con datos sintéticos y LongMemEval. Próximo: cierre.
+- Search returns only what is true **now**.
+- `as_of` returns what was true **at any past date**.
+- `history` shows how a fact changed.
 
-## Hoja de ruta
+It runs locally as an **MCP server**, so Claude Code, Cursor or any MCP client can use it. Everything lives in a single SQLite file.
 
-- [x] **Hito 0. Diseño:** arquitectura, esquema y plan de evaluación, con sqlite-vec probado antes de escribir código.
-- [x] **Hito 1. Núcleo:** SQLite + FTS5, reemplazos con validez temporal, borrado verificado en disco y CLI.
-- [x] **Hito 2. Búsqueda semántica:** embeddings locales, índice vectorial, búsqueda híbrida y elección del modelo con un benchmark propio.
-- [x] **Hito 3. Servidor MCP:** seis herramientas, probadas con el cliente oficial por stdio y con un agente real.
-- [x] **Hito 4. Evaluación:** datos sintéticos y LongMemEval, con las reglas de decisión fijadas antes de medir y los resultados publicados tal como salieron.
-- [ ] **Hito 5. Cierre:** README final y demo.
+![A real CLI session: a fact changes, Vigente proposes the replacement, and search returns what is true now or at a past date](demo/vigente.gif)
 
-## Probarlo
+<sub>A real session, recorded by [`demo/record.py`](demo/record.py) with the embedding model running. The interface and the stored facts are in Spanish.</sub>
+
+## Results
+
+![What the first search result is, by memory system](eval/results/e1_obsoletos.svg)
+
+| | Naive memory | Vigente |
+|---|---:|---:|
+| First result is the right fact ([synthetic set](eval/results/e1_synthetic.md), vector search) | 48% | **95%** |
+| First result is an outdated version of the fact | 51% | **0%** |
+| Recall@5 | 97% | **100%** |
+
+- **Re-ranking by recency is not enough.** It removes outdated results, but then the first result is a different fact in half of the questions (51%).
+- **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 questions from a public benchmark: without supersession, the old version of an updated fact ranks above the new one in **54–56%** of cases, with any search mode.
+- **[Scale](eval/results/scale.md):** with 50,000 memories, a search takes 62 ms and a full deletion 52 ms, plus about 15 ms for the embedding model.
+- **[A real agent](eval/results/agent_demo.md)** (Claude Code, four independent sessions sharing only Vigente) follows the protocol on its own: it searches before saving, links changes without duplicating facts, and answers with what is current.
+
+The decision rules were fixed **before** measuring ([protocol](eval/README.md)), and E1 and E2 give identical results when re-run.
+
+## How it works
+
+- **One file.** SQLite holds the rows, a full-text index (FTS5) and a vector index (sqlite-vec). Every write or deletion is a single transaction across all three.
+- **Facts are never edited.** `supersede` creates the new version, closes the old one and links both. «True at time t» means `valid_from <= t < valid_to`.
+- **The engine calls no LLM.** `remember` uses local embeddings (embeddinggemma via Ollama) to propose facts the new one may replace. The agent, which already is an LLM, decides.
+- **Forgetting is real.** `forget` deletes every version of a fact from the rows, both indexes and the disk. A test checks that the bytes are gone from the file.
+- **It degrades gracefully.** Without embeddings it searches by text. It refuses to send memories to a non-local service unless you allow it.
+
+## Quick start
 
 ```bash
+git clone https://github.com/laulys/vigente && cd vigente
 uv sync
-ollama pull embeddinggemma        # opcional: sin él, Vigente busca solo por texto
-uv run vigente add "El proyecto usa PostgreSQL 15 como base de datos" --valid-from 2026-03-01
-uv run vigente add "Migramos a SQLite para el MVP"     # propone reemplazar el hecho anterior
-uv run vigente supersede <id> "El proyecto usa SQLite" --reason "MVP más simple"
+ollama pull embeddinggemma        # optional: without it, Vigente searches by text only
+uv run vigente add "El proyecto usa PostgreSQL 15" --valid-from 2026-03-01
+uv run vigente add "Migramos a SQLite para el MVP"   # proposes replacing the previous fact
+uv run vigente supersede <old-id> --by <new-id>
 uv run vigente search "¿qué base de datos usamos?"
-uv run vigente search "base de datos" --as-of 2026-06-01
-uv run vigente history <id>
+uv run vigente search "¿qué base de datos usamos?" --as-of 2026-06-01
 ```
 
-## Usarlo desde un agente (MCP)
-
-Vigente expone seis herramientas por MCP: `remember`, `recall`, `supersede`, `forget`, `history` y `list_memories`. El workspace lo fija la configuración, nunca el agente.
+## Use it from an agent (MCP)
 
 **Claude Code:**
 
 ```bash
-claude mcp add vigente -e VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /ruta/a/vigente run vigente-mcp
+claude mcp add vigente -e VIGENTE_WORKSPACE=my-project -- uv --directory /path/to/vigente run vigente-mcp
 ```
 
-**Cursor** (`.cursor/mcp.json`) o **Claude Desktop** (`claude_desktop_config.json`):
+**Cursor** (`.cursor/mcp.json`) or **Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "vigente": {
       "command": "uv",
-      "args": ["--directory", "/ruta/a/vigente", "run", "vigente-mcp"],
-      "env": { "VIGENTE_WORKSPACE": "mi-proyecto" }
+      "args": ["--directory", "/path/to/vigente", "run", "vigente-mcp"],
+      "env": { "VIGENTE_WORKSPACE": "my-project" }
     }
   }
 }
 ```
 
-Cuando el agente guarda algo que deja obsoleto un hecho anterior, `remember` se lo propone y el agente lo enlaza con `supersede`. Desde entonces el hecho anterior no se devuelve, aunque queda en el historial.
+| Tool | What it does |
+|---|---|
+| `remember` | Saves a fact or an episode and proposes current facts it may replace |
+| `recall` | Searches what is true now, or at a past date (`as_of`) |
+| `supersede` | Closes an outdated fact and links its new version (new text, or the id `remember` just returned) |
+| `history` | All versions of a fact |
+| `list_memories` | Lists memories with filters |
+| `forget` | Deletes a fact and all its versions, also from disk (marked as destructive) |
 
-## Configuración
+The workspace is fixed by the server configuration, so an agent cannot read another one.
 
-| Variable | Por defecto | Para qué |
+> **If your client has its own memory**, the agent may save the same fact in both places, and only Vigente will know when it stops being true. In Claude Code you can turn its auto memory off with `"autoMemoryEnabled": false` in the project settings, or with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ([docs](https://code.claude.com/docs/en/memory)).
+
+## Configuration
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `VIGENTE_DB` | `~/.vigente/vigente.db` | Archivo de la memoria |
-| `VIGENTE_WORKSPACE` | `default` | Espacio aislado de memorias |
-| `VIGENTE_EMBED_MODEL` | `embeddinggemma` | Modelo de embeddings; `none` para usar solo texto |
-| `VIGENTE_EMBED_BASE_URL` | `http://localhost:11434/v1` | Cualquier servicio compatible con la API de OpenAI |
-| `VIGENTE_EMBED_API_KEY` | | Solo si el servicio la pide |
-| `VIGENTE_ALLOW_REMOTE` | desactivado | Necesario para enviar memorias a un servicio no local |
-| `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectores + texto) o `text`; ver [ADR-0006](docs/decisions/0006-busqueda-por-vectores.md) |
+| `VIGENTE_DB` | `~/.vigente/vigente.db` | Memory file |
+| `VIGENTE_WORKSPACE` | `default` | Isolated memory space |
+| `VIGENTE_EMBED_MODEL` | `embeddinggemma` | Embedding model; `none` for text-only search |
+| `VIGENTE_EMBED_BASE_URL` | `http://localhost:11434/v1` | Any service with an OpenAI-compatible API |
+| `VIGENTE_EMBED_API_KEY` | | Only if the service needs one |
+| `VIGENTE_ALLOW_REMOTE` | off | Required to send memories to a non-local service |
+| `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectors + text) or `text` |
 
-Si el servicio de embeddings no responde, Vigente sigue funcionando con búsqueda de texto y lo avisa. `vigente reindex` calcula después los vectores pendientes.
+If the embedding service is down, Vigente keeps working with text search and says so. `vigente reindex` fills in the missing vectors later.
 
-## Resultados
+## Design decisions
 
-- **[Datos obsoletos](eval/results/e1_synthetic.md):** con una memoria que guarda cada versión como un hecho más, el primer resultado es una versión obsoleta en el 51% de las preguntas con búsqueda por vectores (44% con la híbrida). Con Vigente, en el 0%, sin perder acierto.
-- **[LongMemEval](eval/results/e2_longmemeval.md), 470 preguntas:** sin reemplazos, en las preguntas de actualización la versión vieja sale antes que la nueva en torno a la mitad de las veces, con cualquier modo de búsqueda.
-- **[Escala](eval/results/scale.md):** con 50.000 memorias, una búsqueda tarda 62 ms y un borrado completo 52 ms, más unos 15 ms del modelo.
-- **[Decisiones](eval/results/decisions.md)** tomadas con esos datos: búsqueda por vectores por defecto, y el umbral de reemplazos se mantiene.
+Each decision has an ADR with the alternatives considered (in Spanish):
 
-- [Demo con un agente real](eval/results/agent_demo.md): cuatro sesiones independientes de Claude Code que solo comparten Vigente. El agente guarda, detecta y enlaza cambios sin duplicar hechos (incluido uno anunciado para la semana siguiente) y en una sesión nueva responde con lo vigente.
-- [Elección del modelo de embeddings](eval/results/embedding_choice.md): con embeddings, la detección de hechos reemplazados sube de F1 0.43 a 0.76 en un conjunto pequeño en español.
+1. [One SQLite file with FTS5 and sqlite-vec, no ORM](docs/decisions/0001-sqlite-fts5-sqlite-vec.md)
+2. [Facts are superseded, never edited, with validity dates](docs/decisions/0002-reemplazo-append-only-con-validez.md)
+3. [The engine calls no LLM: it proposes, the agent decides](docs/decisions/0003-sin-llm-en-el-motor.md)
+4. [embeddinggemma by default, chosen with a benchmark; threshold 0.51](docs/decisions/0004-modelo-de-embeddings.md)
+5. [`supersede` can link a memory that is already stored](docs/decisions/0005-dos-formas-de-reemplazar.md)
+6. [Vector-only search by default, decided with the evaluation](docs/decisions/0006-busqueda-por-vectores.md)
 
-## Desarrollo
+The full design is in [docs/architecture.md](docs/architecture.md).
+
+## Limitations
+
+- **Replacement proposals are noisy.** Similarity cannot tell «this updates that» from «this adds information about the same thing», so same-topic statements also get proposals. That is why the agent decides.
+- **Chains are linear:** a new version replaces one fact. «Ana and Luis moved to Lisbon» cannot close two facts at once.
+- **Search is exact (brute-force KNN).** Its cost grows linearly. Hundreds of thousands of memories would need quantized vectors or an approximate index.
+- **The evaluation has blind spots.** Few queries rely on exact matches (error codes, IDs), which is where text search usually helps, and the synthetic set is built from templates.
+- **The CLI, the ADRs and the evaluation reports are in Spanish.**
+
+## Related work
+
+Descriptions are based on each project's own documentation (checked November 2026).
+
+- **[Delfos](https://github.com/MiltMont/Delfos)** (Apache-2.0): graph-memory MCP server for codebases, with LLM-driven traversal of a Cue → Tag → Content graph and a C++ engine. It inspired this project. Vigente targets general facts that change over time, not code, and its engine calls no LLM.
+- **[Graphiti](https://github.com/getzep/graphiti)** (Apache-2.0) and **Zep**, the commercial service built on it: temporal context graphs that invalidate outdated facts instead of deleting them, with bi-temporal edges. They use an LLM to extract entities and a graph database (Neo4j, FalkorDB or Neptune). This is the closest idea. Vigente trades the graph and the LLM for a single SQLite file and decisions made by the client agent.
+- **[Mem0](https://github.com/mem0ai/mem0)** (Apache-2.0): a memory layer that uses an LLM to extract facts when adding. Since its April 2026 algorithm, extraction only adds memories, and the current state is resolved by time-aware retrieval. Vector store (Qdrant by default).
+- **[Letta](https://github.com/letta-ai/letta)**, formerly MemGPT (Apache-2.0): a platform for stateful agents that edit their own memory blocks through tools, with archival memory in a vector database.
+- **[MCP reference memory server](https://github.com/modelcontextprotocol/servers/tree/main/src/memory)** (MIT): a knowledge graph in a JSONL file, without versions or timestamps.
+- **[LongMemEval](https://github.com/xiaowu0162/LongMemEval)** (ICLR 2025, MIT): benchmark for long-term memory in chat assistants, used here in [E2](eval/results/e2_longmemeval.md).
+
+## Development
 
 ```bash
-uv run pytest                                          # sin red ni modelos
-VIGENTE_TEST_OLLAMA=1 uv run pytest tests/test_ollama.py   # con Ollama local
+uv run pytest                                              # no network or models needed
+VIGENTE_TEST_OLLAMA=1 uv run pytest tests/test_ollama.py   # with local Ollama
 uv run ruff check . && uv run ruff format --check .
-uv run mypy src tests eval
-uv run python eval/embedding_choice.py                 # repite el benchmark
-# evaluación completa: ver eval/README.md
-uv run python eval/agent_demo.py                       # demo con un agente (requiere la CLI de Claude)
+uv run mypy src tests eval demo
 ```
 
-## Diseño
+How to reproduce the whole evaluation: [eval/README.md](eval/README.md).
 
-- [Arquitectura](docs/architecture.md)
-- [Decisiones (ADRs)](docs/decisions/)
+The project was built in five milestones (design, core, semantic search, MCP server, evaluation), each with its decisions in an ADR. Since the MCP server, every milestone went through a [pull request](https://github.com/laulys/vigente/pulls?q=is%3Apr) with its decisions and measurements.
 
-## Licencia
+## License
 
 [MIT](LICENSE)

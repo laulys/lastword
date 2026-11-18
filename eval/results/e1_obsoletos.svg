@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="640" height="340" viewBox="0 0 640 340" font-family="system-ui, sans-serif" font-size="12">
 <rect width="640" height="340" fill="#ffffff"/>
-<text x="56" y="28" font-size="15" font-weight="600" fill="#1f2328">Qué es el primer resultado (búsqueda híbrida, 129 preguntas)</text>
+<text x="56" y="28" font-size="15" font-weight="600" fill="#1f2328">Qué es el primer resultado (búsqueda por vectores, 129 preguntas)</text>
 <line x1="56" x2="624" y1="268.0" y2="268.0" stroke="#d0d7de" stroke-width="1"/>
 <text x="48" y="272.0" text-anchor="end" fill="#57606a">0%</text>
 <line x1="56" x2="624" y1="213.0" y2="213.0" stroke="#d0d7de" stroke-width="1"/>
@@ -11,26 +11,26 @@
 <text x="48" y="107.0" text-anchor="end" fill="#57606a">75%</text>
 <line x1="56" x2="624" y1="48.0" y2="48.0" stroke="#d0d7de" stroke-width="1"/>
 <text x="48" y="52.0" text-anchor="end" fill="#57606a">100%</text>
-<rect x="84.4" y="177.6" width="40.2" height="90.4" fill="#2f7d5b"><title>el dato correcto: 41%</title></rect>
-<text x="104.5" y="172.6" text-anchor="middle" fill="#1f2328">41%</text>
-<rect x="128.6" y="170.8" width="40.2" height="97.2" fill="#e0913b"><title>una versión obsoleta: 44%</title></rect>
-<text x="148.7" y="165.8" text-anchor="middle" fill="#1f2328">44%</text>
-<rect x="172.8" y="235.6" width="40.2" height="32.4" fill="#9aa4b2"><title>otro dato o un episodio: 15%</title></rect>
-<text x="192.8" y="230.6" text-anchor="middle" fill="#1f2328">15%</text>
+<rect x="84.4" y="162.3" width="40.2" height="105.7" fill="#2f7d5b"><title>el dato correcto: 48%</title></rect>
+<text x="104.5" y="157.3" text-anchor="middle" fill="#1f2328">48%</text>
+<rect x="128.6" y="155.4" width="40.2" height="112.6" fill="#e0913b"><title>una versión obsoleta: 51%</title></rect>
+<text x="148.7" y="150.4" text-anchor="middle" fill="#1f2328">51%</text>
+<rect x="172.8" y="266.3" width="40.2" height="1.7" fill="#9aa4b2"><title>otro dato o un episodio: 1%</title></rect>
+<text x="192.8" y="261.3" text-anchor="middle" fill="#1f2328">1%</text>
 <text x="150.7" y="288" text-anchor="middle" fill="#1f2328">ingenua</text>
 <rect x="273.7" y="160.6" width="40.2" height="107.4" fill="#2f7d5b"><title>el dato correcto: 49%</title></rect>
 <text x="293.8" y="155.6" text-anchor="middle" fill="#1f2328">49%</text>
-<rect x="317.9" y="257.8" width="40.2" height="10.2" fill="#e0913b"><title>una versión obsoleta: 5%</title></rect>
-<text x="338.0" y="252.8" text-anchor="middle" fill="#1f2328">5%</text>
-<rect x="362.1" y="165.7" width="40.2" height="102.3" fill="#9aa4b2"><title>otro dato o un episodio: 47%</title></rect>
-<text x="382.2" y="160.7" text-anchor="middle" fill="#1f2328">47%</text>
+<rect x="317.9" y="268.0" width="40.2" height="0.0" fill="#e0913b"><title>una versión obsoleta: 0%</title></rect>
+<text x="338.0" y="263.0" text-anchor="middle" fill="#1f2328">0%</text>
+<rect x="362.1" y="155.4" width="40.2" height="112.6" fill="#9aa4b2"><title>otro dato o un episodio: 51%</title></rect>
+<text x="382.2" y="150.4" text-anchor="middle" fill="#1f2328">51%</text>
 <text x="340.0" y="288" text-anchor="middle" fill="#1f2328">ingenua + recencia</text>
-<rect x="463.1" y="94.0" width="40.2" height="174.0" fill="#2f7d5b"><title>el dato correcto: 79%</title></rect>
-<text x="483.2" y="89.0" text-anchor="middle" fill="#1f2328">79%</text>
+<rect x="463.1" y="59.9" width="40.2" height="208.1" fill="#2f7d5b"><title>el dato correcto: 95%</title></rect>
+<text x="483.2" y="54.9" text-anchor="middle" fill="#1f2328">95%</text>
 <rect x="507.2" y="268.0" width="40.2" height="0.0" fill="#e0913b"><title>una versión obsoleta: 0%</title></rect>
 <text x="527.3" y="263.0" text-anchor="middle" fill="#1f2328">0%</text>
-<rect x="551.4" y="222.0" width="40.2" height="46.0" fill="#9aa4b2"><title>otro dato o un episodio: 21%</title></rect>
-<text x="571.5" y="217.0" text-anchor="middle" fill="#1f2328">21%</text>
+<rect x="551.4" y="256.1" width="40.2" height="11.9" fill="#9aa4b2"><title>otro dato o un episodio: 5%</title></rect>
+<text x="571.5" y="251.1" text-anchor="middle" fill="#1f2328">5%</text>
 <text x="529.3" y="288" text-anchor="middle" fill="#1f2328">vigente</text>
 <rect x="56" y="314" width="12" height="12" fill="#2f7d5b"/>
 <text x="74" y="324" fill="#1f2328">el dato correcto</text>

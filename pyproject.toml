@@ -9,6 +9,7 @@ authors = [
     { name = "laulys20", email = "187386385+laulys@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
+keywords = ["mcp", "memory", "llm", "agents", "sqlite", "embeddings", "rag"]
 dependencies = [
     "httpx>=0.28.1",
     "mcp>=2.3.0",
@@ -16,6 +17,10 @@ dependencies = [
     "sqlite-vec==0.1.9",
     "typer>=0.29.2",
 ]
+
+[project.urls]
+Repository = "https://github.com/laulys/vigente"
+Documentation = "https://github.com/laulys/vigente#readme"
 
 [project.scripts]
 vigente = "vigente.cli:app"

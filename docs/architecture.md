@@ -1,6 +1,6 @@
 # Vigente — Arquitectura
 
-Estado: **aprobada** (18-11-2026). Hitos 1 a 4 implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
+Estado: **aprobada** (18-11-2026). Los cinco hitos están implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
 
 ## 1. Resumen
 
