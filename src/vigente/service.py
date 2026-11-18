@@ -52,7 +52,6 @@ from vigente.models import (
 Clock = Callable[[], datetime]
 
 CANDIDATE_LIMIT = 3
-MAX_CHAIN_LENGTH = 10_000
 REINDEX_BATCH = 32
 _ONE_MS = timedelta(milliseconds=1)
 
@@ -449,11 +448,13 @@ class MemoryService:
     def _latest(self, memory: Memory) -> Memory:
         """La versión vigente de un hecho: sus sucesoras, hasta la última."""
         current = memory
-        for _ in range(MAX_CHAIN_LENGTH):
-            if current.superseded_by_id is None:
-                return current
+        seen = {memory.id}
+        while current.superseded_by_id is not None:
+            if current.superseded_by_id in seen:  # solo con una base dañada; doctor lo detecta
+                raise RuntimeError("Cadena de reemplazos con un ciclo.")
+            seen.add(current.superseded_by_id)
             current = self._require(current.superseded_by_id)
-        raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
+        return current
 
     def _lineage(self, memory: Memory) -> list[Memory]:
         """Todas las versiones conectadas por reemplazos, en orden de vigencia.
@@ -469,10 +470,8 @@ class MemoryService:
             if current.superseded_by_id is not None:
                 neighbours.append(current.superseded_by_id)
             for neighbour_id in neighbours:
-                if neighbour_id in found:
+                if neighbour_id in found:  # también corta un ciclo, si la base estuviera dañada
                     continue
-                if len(found) >= MAX_CHAIN_LENGTH:
-                    raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
                 found[neighbour_id] = self._require(neighbour_id)
                 pending.append(found[neighbour_id])
         return sorted(found.values(), key=lambda m: (m.valid_from, m.created_at, m.id))

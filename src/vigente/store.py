@@ -97,6 +97,13 @@ _MIGRATIONS: tuple[str | Callable[[sqlite3.Connection], None], ...] = (
     """
     CREATE INDEX memories_ws_embedding ON memories(workspace_id, embedding_model);
     """,
+    # v6: al borrar una memoria, SQLite comprueba que ninguna otra la tenga en supersedes_id.
+    # Sin índice recorría la tabla por cada versión borrada: 3 s para olvidar un hecho con
+    # 10.000 versiones, frente a 0,2 s.
+    """
+    CREATE INDEX memories_supersedes ON memories(supersedes_id)
+        WHERE supersedes_id IS NOT NULL;
+    """,
 )
 LATEST_SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -420,9 +427,12 @@ def get_memory(conn: sqlite3.Connection, workspace_id: str, memory_id: str) -> M
 def predecessor_ids(conn: sqlite3.Connection, workspace_id: str, memory_id: str) -> list[str]:
     """Las versiones que `memory_id` reemplazó: una, o varias si unió varios hechos."""
     rows = conn.execute(
-        "SELECT id FROM memories WHERE workspace_id = ? AND superseded_by_id = ? "
-        "ORDER BY valid_from, seq",
-        (workspace_id, memory_id),
+        # INDEXED BY: sin él, SQLite elige el índice de fechas para ahorrarse el ORDER BY y
+        # recorre el workspace entero en cada llamada (7 s para el historial de un hecho con
+        # 10.000 versiones; con el índice, 0,1 s).
+        "SELECT id FROM memories INDEXED BY memories_superseded_by "
+        "WHERE superseded_by_id = ? AND workspace_id = ? ORDER BY valid_from, seq",
+        (memory_id, workspace_id),
     ).fetchall()
     return [str(row["id"]) for row in rows]
 
