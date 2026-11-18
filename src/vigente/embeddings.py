@@ -53,6 +53,7 @@ PROFILES: dict[str, ModelProfile] = {
     # Los documentos van sin instrucción.
     "qwen3-embedding": ModelProfile(
         query="Instruct: Given a question, retrieve stored memories that answer it\nQuery:{text}",
+        candidate_threshold=0.45,  # mejor F1 en eval/results/embedding_choice.md
         similarity=(
             "Instruct: Given a new statement, retrieve stored statements about the same "
             "subject that it may update or contradict\nQuery:{text}"
@@ -62,6 +63,7 @@ PROFILES: dict[str, ModelProfile] = {
         document="title: none | text: {text}",
         query="task: search result | query: {text}",
         similarity="task: sentence similarity | query: {text}",
+        candidate_threshold=0.51,  # mejor F1 en eval/results/embedding_choice.md (ADR-0004)
     ),
 }
 

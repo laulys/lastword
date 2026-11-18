@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from vigente.embeddings import DEFAULT_BASE_URL, OpenAICompatibleEmbedder
 
-DEFAULT_EMBED_MODEL = "qwen3-embedding:0.6b"
+DEFAULT_EMBED_MODEL = "embeddinggemma"  # ver ADR-0004
 _DISABLED = {"", "none", "off", "false", "0"}
 _ENABLED = {"1", "true", "yes", "on"}
 
