@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from pydantic import ValidationError
 
 from tests.helpers import FakeClock, recall_ids, remember, supersede
+from vigente import store
 from vigente.errors import AlreadySupersededError, NotSupersedableError
 from vigente.models import Memory, SupersedeRequest
 from vigente.service import MemoryService
@@ -82,7 +85,7 @@ def test_forget_removes_every_connected_version(
     ana, luis = two_cities
     merged = supersede(service, ana.id, "Ana y Luis viven en Lisboa", also_old_ids=[luis.id])
     other = remember(service, "Marta vive en Valencia")
-    assert sorted(service.forget(luis.id)) == sorted([ana.id, luis.id, merged.id])
+    assert sorted(service.forget(luis.id).deleted_ids) == sorted([ana.id, luis.id, merged.id])
     assert recall_ids(service, "vive", include_history=True) == [other.id]
     assert service.doctor() == []
 
@@ -112,3 +115,56 @@ def test_the_same_fact_cannot_be_listed_twice(two_cities: tuple[Memory, Memory])
     ana, _ = two_cities
     with pytest.raises(ValidationError):
         SupersedeRequest(old_id=ana.id, also_old_ids=[ana.id], new_content="Ana vive en Lisboa")
+
+
+def test_another_fact_can_be_added_later_to_the_same_replacement(
+    service: MemoryService, clock: FakeClock, two_cities: tuple[Memory, Memory]
+) -> None:
+    """«Ah, y eso también dejó obsoleto lo de Luis»: se enlaza después, sin duplicar nada."""
+    ana, luis = two_cities
+    merged = supersede(service, ana.id, "Ana y Luis viven en Lisboa", reason="mudanza")
+    clock.advance(days=1)
+    result = service.supersede(SupersedeRequest(old_id=luis.id, new_id=merged.id))
+    assert (result.new.supersedes_id, result.new.supersede_reason) == (ana.id, "mudanza")
+    assert result.old.superseded_by_id == merged.id
+    assert result.old.valid_to == merged.valid_from
+    assert [m.id for m in service.history(luis.id)] == [ana.id, luis.id, merged.id]
+    assert service.doctor() == []
+
+
+def test_a_fact_with_thousands_of_versions_can_still_be_read_and_forgotten(
+    service: MemoryService, conn: sqlite3.Connection
+) -> None:
+    """Había un tope de 10.000 versiones al leer, pero no al escribir: pasado el tope, el
+    hecho ya no se podía consultar ni, lo que es peor, olvidar."""
+    total = 10_050
+    ids = [f"01KE{number:022d}" for number in range(total)]
+    with store.transaction(conn):  # con SQL: crearlas una a una con supersede tarda 25 s
+        conn.execute("PRAGMA defer_foreign_keys = ON")  # cada versión apunta a la siguiente
+        for number, memory_id in enumerate(ids):
+            last = number == total - 1
+            conn.execute(
+                "INSERT INTO memories (seq, id, workspace_id, kind, content, created_at, "
+                "valid_from, valid_to, status, supersedes_id, superseded_by_id) "
+                "VALUES (?, ?, 'test', 'fact', ?, 0, ?, ?, ?, ?, ?)",
+                (
+                    number + 1,
+                    memory_id,
+                    f"Contador: {number}",
+                    number,
+                    store.OPEN_END_MS if last else number + 1,
+                    "active" if last else "superseded",
+                    ids[number - 1] if number else None,
+                    None if last else ids[number + 1],
+                ),
+            )
+            conn.execute(
+                "INSERT INTO memories_fts (rowid, content, tags) VALUES (?, ?, '')",
+                (number + 1, f"Contador: {number}"),
+            )
+    assert service.doctor() == []
+    assert [memory.id for memory in service.history(ids[0])] == ids
+    with pytest.raises(AlreadySupersededError) as caught:
+        supersede(service, ids[0], "Contador: otro")
+    assert caught.value.current_id == ids[-1]
+    assert len(service.forget(ids[5000]).deleted_ids) == total

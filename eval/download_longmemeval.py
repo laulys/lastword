@@ -20,7 +20,18 @@ FILE_URL = f"https://huggingface.co/datasets/{REPO}/resolve/main/{{name}}"
 DATASETS = Path(__file__).parent / "datasets"
 
 
+# El archivo con el que se obtuvieron los resultados publicados. Si el del repositorio de
+# origen cambia, la descarga se rechaza en vez de dar por buenos unos datos distintos.
+PINNED_SHA256 = {
+    "longmemeval_s_cleaned.json": (
+        "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
+    ),
+}
+
+
 def expected_sha256(name: str) -> str:
+    if name in PINNED_SHA256:
+        return PINNED_SHA256[name]
     for entry in httpx.get(TREE, timeout=30).raise_for_status().json():
         if entry.get("path") == name:
             return str(entry["lfs"]["oid"])

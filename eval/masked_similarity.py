@@ -54,11 +54,16 @@ class Score:
 
 def mask(text: str) -> str:
     """Tapa los valores: palabras con cifras y nombres propios (en mayúscula, salvo al empezar)."""
-    masked = text
-    for position, word in enumerate(WORD.findall(text)):
-        if any(char.isdigit() for char in word) or (position > 0 and word[0].isupper()):
-            masked = re.sub(rf"\b{re.escape(word)}\b", "X", masked, count=1)
-    return masked
+    position = -1
+
+    def hide(match: re.Match[str]) -> str:
+        nonlocal position
+        position += 1
+        word = match.group()
+        is_value = any(char.isdigit() for char in word) or (position > 0 and word[0].isupper())
+        return "X" if is_value else word
+
+    return WORD.sub(hide, text)
 
 
 def score(statements: list[Statement], keys: list[str], sim: Similarity, threshold: float) -> Score:

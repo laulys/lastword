@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from vigente import safety
+from vigente import safety, store
 from vigente.config import (
     DEFAULT_DB_PATH,
     DEFAULT_EMBED_MODEL,
@@ -171,6 +172,9 @@ def _service(ctx: typer.Context) -> Iterator[MemoryService]:
         _fail(options, exc.code, message, current_id=exc.current_id)
     except ValidationError as exc:
         _fail(options, "invalid_input", describe_validation_error(exc), exit_code=2)
+    except sqlite3.Error as exc:  # archivo que no se puede abrir, base ocupada por otro proceso
+        error = store.database_error(exc)
+        _fail(options, error.code, error.message)
     finally:
         if service is not None:
             service.close()
@@ -482,18 +486,24 @@ def forget(
     yes: Annotated[bool, typer.Option("--yes", "-y", help=tr("No pedir confirmación."))] = False,
 ) -> None:
     with _service(ctx) as service:
+        memory = service.get(memory_id)  # antes de preguntar: que exista
         if not yes:
+            if _options(ctx).as_json:  # la pregunta se mezclaría con el JSON de la salida
+                message = tr("Con --json no se puede preguntar: confirma el borrado con --yes.")
+                _fail(_options(ctx), "invalid_input", message, exit_code=2)
             typer.confirm(
-                tr("¿Borrar para siempre {id} y todas sus versiones?", id=memory_id), abort=True
+                tr("¿Borrar para siempre {id} y todas sus versiones?", id=memory.id), abort=True
             )
-        deleted = service.forget(memory_id)
+        result = service.forget(memory.id)
+        deleted = result.deleted_ids
         _emit(
             ctx,
-            {"deleted_ids": deleted},
+            result,
             lambda: out.print(
                 tr("[green]Borradas[/] {n}: {ids}", n=len(deleted), ids=", ".join(deleted))
             ),
         )
+        _warn(ctx, result.warnings)
 
 
 @app.command("list", help=tr("Lista memorias, las más recientes primero."))

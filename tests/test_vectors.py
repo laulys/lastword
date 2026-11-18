@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import random
 import sqlite3
 import struct
+from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 
@@ -10,6 +12,7 @@ import pytest
 from tests.fakes import DATABASE_WORDS, FailingEmbedder, FakeEmbedder, FixedEmbedder
 from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
 from vigente import store
+from vigente.embeddings import Purpose
 from vigente.errors import ConfigError, NotSupersedableError
 from vigente.models import (
     Hit,
@@ -206,13 +209,20 @@ class TestForgetAndIntegrity:
     def test_forget_erases_vectors_from_disk(
         self, conn: sqlite3.Connection, clock: FakeClock, db_path: Path
     ) -> None:
-        vector = [1.2345678, -9.8765432, 3.1415926, 2.7182818, -1.4142135, 0.5772156]
+        rng = random.Random(5)  # 128 dimensiones: su copia binaria ocupa 16 bytes reconocibles
+        vector = [rng.uniform(-1, 1) for _ in range(128)]
         service = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder(vector))
         memory = remember(service, "Ana vive en Madrid")
         raw = struct.pack(f"{len(vector)}f", *vector)
-        assert raw in disk_bytes(db_path)  # control: el vector estaba en disco
+        bits = bytes(  # su copia de 1 bit por dimensión, la que elige candidatos (ADR-0010)
+            sum(1 << i for i, value in enumerate(vector[start : start + 8]) if value > 0)
+            for start in range(0, len(vector), 8)
+        )
+        assert raw in disk_bytes(db_path)  # control: los dos estaban en disco
+        assert bits in disk_bytes(db_path)
         service.forget(memory.id)
         assert raw not in disk_bytes(db_path)
+        assert bits not in disk_bytes(db_path)
         assert service.doctor() == []
 
     def test_doctor_detects_stale_vector_metadata(
@@ -369,3 +379,136 @@ def test_memories_without_vectors_are_still_found(
     online.reindex()
     result = online.recall(RecallQuery(query="Ana Madrid"))
     assert (result.mode, result.warnings) == ("vector", [])
+
+
+def test_a_stored_null_vector_does_not_break_search(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """Un vector de ceros no tiene distancia coseno. El cliente HTTP ya los rechaza, pero uno
+    guardado por otro proveedor no debe dejar el workspace sin búsqueda."""
+    broken = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder([0.0, 0.0, 0.0, 0.0]))
+    remember(broken, "Ana vive en Madrid")
+    healthy = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder([1.0, 0.0, 0.0, 0.0]))
+    luis = remember(healthy, "Luis vive en Valencia")
+    assert recall_ids(healthy, "dónde vive Luis") == [luis.id]
+    assert healthy.doctor() == []
+
+
+class TestSeveralModels:
+    """Lo que pasa cuando no todas las memorias tienen vector del modelo en uso."""
+
+    def test_a_fact_saved_without_vector_is_still_proposed(
+        self, conn: sqlite3.Connection, clock: FakeClock, embedder: FakeEmbedder
+    ) -> None:
+        """Guardado con el servicio caído, solo lo encuentra el texto. Sin proponerlo, la
+        versión vieja y la nueva quedarían vigentes."""
+        old = remember(MemoryService(conn, "test", clock=clock), "El proyecto usa PostgreSQL 15")
+        semantic = MemoryService(conn, "test", clock=clock, embedder=embedder)
+        result = semantic.remember(NewMemory(content="El proyecto usa PostgreSQL 16"))
+        assert [hit.memory.id for hit in result.possible_supersedes] == [old.id]
+        assert any("vigente reindex" in warning for warning in result.warnings)
+
+    def test_going_back_to_a_previous_model_keeps_vector_search(
+        self, conn: sqlite3.Connection, clock: FakeClock
+    ) -> None:
+        first = MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(model="a"))
+        ana = remember(first, "Ana vive en Madrid")
+        assert (
+            MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(model="b"))
+            .reindex()
+            .embedded
+            == 1
+        )
+        result = first.recall(RecallQuery(query="Ana Madrid"))
+        assert (result.mode, result.warnings) == ("vector", [])
+        assert [hit.memory.id for hit in result.results] == [ana.id]
+
+    def test_a_model_that_changes_dimension_warns_and_reindex_fixes_it(
+        self, conn: sqlite3.Connection, clock: FakeClock
+    ) -> None:
+        small = MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(dim=64))
+        ana = remember(small, "Ana vive en Madrid")
+        large = MemoryService(conn, "test", clock=clock, embedder=FakeEmbedder(dim=128))
+        remember(large, "Luis trabaja en Valencia")
+        degraded = large.recall(RecallQuery(query="Ana Madrid"))
+        assert degraded.mode == "hybrid"  # Ana no tiene vector de 128 dimensiones: la da el texto
+        assert ana.id in [hit.memory.id for hit in degraded.results]
+        assert large.doctor() == []
+
+        assert large.reindex().embedded == 1
+        assert large.recall(RecallQuery(query="Ana Madrid")).mode == "vector"
+        # De vuelta en la dimensión anterior, a Luis le falta ese vector: reindex lo calcula.
+        assert small.reindex().model_dump() == {"model": "fake-embedder", "dim": 64, "embedded": 1}
+        assert small.recall(RecallQuery(query="Luis Valencia")).mode == "vector"
+
+    def test_reindex_never_gives_a_forgotten_vector_to_another_memory(
+        self, db_path: Path, clock: FakeClock
+    ) -> None:
+        """Mientras reindex espera al modelo, otro cliente olvida la memoria más reciente y
+        guarda otra, que hereda su número de fila."""
+        other = MemoryService.open(db_path, "test", clock=clock)
+        forgotten = remember(other, "Ana tiene diabetes tipo uno")
+
+        class DuringEmbedding(FakeEmbedder):
+            pending: bool = True
+
+            def embed(self, texts: Sequence[str], purpose: Purpose) -> list[list[float]]:
+                if self.pending:
+                    self.pending = False
+                    other.forget(forgotten.id)
+                    remember(other, "El gato se llama Michi")
+                return super().embed(texts, purpose)
+
+        reindexing = MemoryService.open(db_path, "test", clock=clock, embedder=DuringEmbedding())
+        assert reindexing.reindex().embedded == 1  # el gato, con su propio vector
+        (hit,) = reindexing.recall(RecallQuery(query="El gato se llama Michi")).results
+        assert hit.similarity == pytest.approx(1.0)
+        leaked = reindexing.recall(RecallQuery(query="Ana tiene diabetes tipo uno")).results
+        assert all((hit.similarity or 0.0) < 0.5 for hit in leaked)
+        other.close()
+        reindexing.close()
+
+
+def test_the_nearest_memory_is_returned_even_with_negative_similarity(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """Sin umbral, recall devuelve siempre los vecinos más cercanos, por lejos que estén."""
+    stored = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder([1.0, 0.0, 0.0, 0.0]))
+    ana = remember(stored, "Ana vive en Madrid")
+    opposite = MemoryService(
+        conn, "test", clock=clock, embedder=FixedEmbedder([-1.0, 0.0, 0.0, 0.0])
+    )
+    (hit,) = opposite.recall(RecallQuery(query="algo sin relación")).results
+    assert hit.memory.id == ana.id
+    assert hit.similarity == pytest.approx(-1.0)
+
+
+def test_filters_apply_before_candidates_are_chosen(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """La búsqueda en dos pasos elige 100 candidatos (ADR-0010). Si los filtros se aplicaran
+    después, 300 memorias idénticas a la buscada, pero de otro workspace, de otro tipo o ya
+    reemplazadas, ocuparían todos los puestos y la buena no saldría."""
+    embedder = FakeEmbedder()
+    text = "La contraseña del wifi de la oficina cambia cada trimestre"
+    other = MemoryService(conn, "otro", clock=clock, embedder=embedder)
+    service = MemoryService(conn, "test", clock=clock, embedder=embedder)
+    for _ in range(120):
+        remember(other, text, valid_from=T0)
+        remember(service, text, kind="episode", valid_from=T0 - timedelta(days=1))
+    for number in range(150):
+        remember(service, f"Dato de relleno número {number} sobre otro asunto", valid_from=T0)
+    outdated = remember(service, text, valid_from=T0)
+    for _ in range(60):
+        clock.advance(minutes=1)
+        outdated = supersede(service, outdated.id, text)
+    current = outdated
+    assert (
+        store.count_without_vector(conn, "test", store.find_embedding_space(conn, embedder.model))
+        == 0
+    )
+
+    hits = service.recall(RecallQuery(query=text, k=3, kind=Kind.FACT)).results
+    assert hits[0].memory.id == current.id
+    assert hits[0].similarity == pytest.approx(1.0)
+    assert all(hit.memory.status.value == "active" for hit in hits)

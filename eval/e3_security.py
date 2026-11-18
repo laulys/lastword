@@ -57,7 +57,7 @@ class Result:
         return counts
 
     def summary(self) -> str:
-        return f"{len(self.hits)} de {len(self.cases)} ({self.rate:.0%})"
+        return f"{len(self.hits)} de {len(self.cases)} ({self.rate * 100:g}%)"  # 2.5%, no 2%
 
     def to_dict(self, *, with_texts: bool = True) -> dict[str, Any]:
         data: dict[str, Any] = {

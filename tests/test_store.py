@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 import sqlite3
+import stat
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -31,7 +33,7 @@ def test_reconnecting_keeps_the_schema(db_path: Path) -> None:
 
 def _open_each_round(paths: list[str], barrier: Any, errors: Any) -> None:
     for path in paths:
-        barrier.wait()  # todos los procesos abren la misma base nueva en el mismo instante
+        barrier.wait(timeout=60)  # todos abren la misma base nueva en el mismo instante
         try:
             store.connect(path).close()
         except Exception as exc:  # el proceso principal decide si es un fallo
@@ -49,6 +51,8 @@ def test_several_processes_can_create_the_same_database_at_once(tmp_path: Path) 
         worker.start()
     for worker in workers:
         worker.join(timeout=120)
+        if worker.is_alive():  # que un proceso colgado no deje el test esperando para siempre
+            worker.kill()
     found = []
     while not errors.empty():
         found.append(errors.get_nowait())
@@ -112,10 +116,11 @@ def test_upgrades_a_database_from_the_first_schema(db_path: Path) -> None:
     old.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
     old.close()
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 4
+    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 6
     assert store.embedding_spaces(conn) == []
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(memories)")}
     assert "memories_superseded_by" in indexes  # v3: varias versiones anteriores
+    assert {"memories_ws_embedding", "memories_supersedes"} <= indexes  # v5 y v6
     assert [tuple(row) for row in conn.execute("SELECT id FROM workspaces")] == [("test",)]
     conn.close()
 
@@ -159,7 +164,7 @@ def test_upgrades_exact_vectors_to_two_stage_search(db_path: Path) -> None:
     raw.close()
 
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == 4
+    assert store.schema_version(conn) == 6
     (space,) = store.embedding_spaces(conn)
     assert (space.table, space.exact) == ("vecb_1", "vecx_1")
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -180,3 +185,15 @@ def test_text_search_scans_the_fts_index_first(conn: sqlite3.Connection) -> None
     query = next(sql for sql in captured if "memories_fts MATCH" in sql)
     plan = [row[3] for row in conn.execute("EXPLAIN QUERY PLAN " + query)]
     assert plan[0].startswith("SCAN memories_fts"), plan
+
+
+@pytest.mark.skipif(os.name != "posix", reason="permisos POSIX")
+def test_a_new_database_is_private_to_its_owner(tmp_path: Path) -> None:
+    """La memoria puede contener datos personales: otros usuarios del ordenador no la leen."""
+    path = tmp_path / "nueva" / "vigente.db"
+    conn = store.connect(path)
+    conn.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
+    conn.close()
+    modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in [path.parent, *path.parent.iterdir()]}
+    assert modes["nueva"] == 0o700
+    assert {mode for name, mode in modes.items() if name != "nueva"} == {0o600}

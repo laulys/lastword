@@ -31,6 +31,7 @@ from vigente.i18n import tr
 from vigente.ids import new_ulid
 from vigente.models import (
     MAX_LIST_LIMIT,
+    ForgetResult,
     Hit,
     Kind,
     ListQuery,
@@ -51,7 +52,6 @@ from vigente.models import (
 Clock = Callable[[], datetime]
 
 CANDIDATE_LIMIT = 3
-MAX_CHAIN_LENGTH = 10_000
 REINDEX_BATCH = 32
 _ONE_MS = timedelta(milliseconds=1)
 
@@ -203,7 +203,12 @@ class MemoryService:
             return self._superseded(new.id, olds, warnings)
 
     def _link(self, old_ids: list[str], new_id: str, reason: str | None) -> SupersedeResult:
-        """Enlaza una memoria ya guardada como versión nueva de otras, sin duplicar el hecho."""
+        """Enlaza una memoria ya guardada como versión nueva de otras, sin duplicar el hecho.
+
+        Si ya era la versión nueva de otro hecho, se le suman estos: así se puede completar
+        después un reemplazo («también dejó obsoleto esto otro»). Su hecho principal y su
+        motivo no cambian.
+        """
         with store.transaction(self._conn):
             olds = [self._require(old_id) for old_id in old_ids]
             new = self._require(new_id)
@@ -211,19 +216,16 @@ class MemoryService:
                 self._check_supersedable(old)
             if new.kind is not Kind.FACT:
                 raise NotSupersedableError(tr("La versión nueva tiene que ser un fact."))
-            if new.supersedes_id is not None:
-                raise NotSupersedableError(
-                    tr("{new} ya es la versión nueva de {old}.", new=new.id, old=new.supersedes_id)
-                )
             connected = {memory.id for memory in self._lineage(new)}
             if any(old.id in connected for old in olds):
                 raise NotSupersedableError(
                     tr("Ese enlace crearía un ciclo en la cadena de versiones.")
                 )
             _check_starts_after(new.valid_from, max(old.valid_from for old in olds))
-            store.set_supersedes(
-                self._conn, self.workspace_id, new.id, supersedes_id=olds[0].id, reason=reason
-            )
+            if new.supersedes_id is None:
+                store.set_supersedes(
+                    self._conn, self.workspace_id, new.id, supersedes_id=olds[0].id, reason=reason
+                )
             self._close(olds, new.id, new.valid_from)
             return self._superseded(new.id, olds)
 
@@ -243,23 +245,36 @@ class MemoryService:
             warnings=warnings or [],
         )
 
-    def forget(self, memory_id: str) -> list[str]:
+    def forget(self, memory_id: str) -> ForgetResult:
         """Borra para siempre el hecho y todas sus versiones, también las de los hechos que una
-        versión unió (ADR-0008). Devuelve los ids borrados."""
+        versión unió (ADR-0008). Avisa si otra conexión impide vaciar el registro de cambios."""
         with store.transaction(self._conn):
             ids = [memory.id for memory in self._lineage(self._require(memory_id))]
             store.delete_memories(self._conn, self.workspace_id, ids)
-        store.checkpoint(self._conn)
-        return ids
+        warnings = []
+        if not store.checkpoint(self._conn):
+            warnings.append(
+                tr(
+                    "Borrado: ya no se puede leer ni buscar. Otra conexión está usando la base, "
+                    "así que el texto sigue en el archivo de registro (-wal) hasta que se cierre."
+                )
+            )
+        return ForgetResult(deleted_ids=ids, warnings=warnings)
 
     def reindex(self) -> ReindexResult:
         """Calcula los vectores que falten con el modelo configurado."""
         if self._embedder is None:
             raise ConfigError(tr("No hay modelo de embeddings configurado."))
         model = self._embedder.model
+        # Un modelo puede tener varios espacios si cambió de dimensión. Cuál es el actual solo
+        # se sabe preguntando al modelo; con un único espacio no hace falta.
+        dim: int | None = None
+        if len([s for s in store.embedding_spaces(self._conn) if s.model == model]) > 1:
+            dim = len(self._embedder.embed(["dimensión"], "document")[0])
         embedded = 0
+        idle_passes = 0
         while True:
-            space = store.find_embedding_space(self._conn, model)
+            space = store.find_embedding_space(self._conn, model, dim)
             pending = store.memories_without_vector(
                 self._conn, self.workspace_id, space, limit=REINDEX_BATCH
             )
@@ -272,17 +287,24 @@ class MemoryService:
                 target = store.ensure_embedding_space(
                     self._conn, model, len(vectors[0]), store.to_ms(self._now())
                 )
-                for (seq, _), vector in zip(pending, vectors, strict=True):
-                    # Releer dentro de la transacción: pudo cambiar o borrarse mientras tanto.
+                for (seq, memory), vector in zip(pending, vectors, strict=True):
+                    # Releer dentro de la transacción: mientras se calculaban los vectores pudo
+                    # borrarse, y su número de fila pudo pasar a una memoria nueva. El vector
+                    # de un texto olvidado no debe acabar en otra memoria.
                     current = store.get_memory_by_seq(self._conn, self.workspace_id, seq)
-                    if current is None or store.has_vector(self._conn, target, seq):
+                    if current is None or current.id != memory.id:
+                        continue
+                    if store.has_vector(self._conn, target, seq):
                         continue
                     store.insert_vector(self._conn, target, seq, current, vector)
                     added += 1
             embedded += added
-            if added == 0:  # nada que hacer en este lote: evita un bucle infinito
+            # Un lote sin nada que guardar puede deberse a memorias borradas entretanto: se
+            # mira una vez más. Dos seguidos, y se para: evita un bucle infinito.
+            idle_passes = 0 if added else idle_passes + 1
+            if idle_passes == 2:
                 break
-        space = store.find_embedding_space(self._conn, model)
+        space = store.find_embedding_space(self._conn, model, dim)
         return ReindexResult(
             model=model, dim=None if space is None else space.dim, embedded=embedded
         )
@@ -345,19 +367,12 @@ class MemoryService:
             min_similarity=self._embedder.profile.min_recall_similarity,
         )
         if self._search_mode is SearchMode.VECTOR:
-            model = self._embedder.model
-            if not store.has_memories_without_vector(self._conn, self.workspace_id, model):
+            if not store.has_memories_without_vector(self._conn, self.workspace_id, space):
                 return RecallResult(
                     mode="vector", results=vector_hits[: query.k], warnings=warnings
                 )
             # Las memorias sin vector solo las encuentra el texto: se combina para no perderlas.
-            warnings.append(
-                tr(
-                    "Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para "
-                    "no perderlas. Ejecuta `vigente reindex`.",
-                    model=model,
-                )
-            )
+            warnings.append(_without_vector_warning(self._embedder.model))
         fused = retrieval.hybrid(text_hits(), vector_hits, limit=query.k)
         return RecallResult(mode="hybrid", results=fused, warnings=warnings)
 
@@ -435,11 +450,13 @@ class MemoryService:
     def _latest(self, memory: Memory) -> Memory:
         """La versión vigente de un hecho: sus sucesoras, hasta la última."""
         current = memory
-        for _ in range(MAX_CHAIN_LENGTH):
-            if current.superseded_by_id is None:
-                return current
+        seen = {memory.id}
+        while current.superseded_by_id is not None:
+            if current.superseded_by_id in seen:  # solo con una base dañada; doctor lo detecta
+                raise RuntimeError("Cadena de reemplazos con un ciclo.")
+            seen.add(current.superseded_by_id)
             current = self._require(current.superseded_by_id)
-        raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
+        return current
 
     def _lineage(self, memory: Memory) -> list[Memory]:
         """Todas las versiones conectadas por reemplazos, en orden de vigencia.
@@ -455,10 +472,8 @@ class MemoryService:
             if current.superseded_by_id is not None:
                 neighbours.append(current.superseded_by_id)
             for neighbour_id in neighbours:
-                if neighbour_id in found:
+                if neighbour_id in found:  # también corta un ciclo, si la base estuviera dañada
                     continue
-                if len(found) >= MAX_CHAIN_LENGTH:
-                    raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
                 found[neighbour_id] = self._require(neighbour_id)
                 pending.append(found[neighbour_id])
         return sorted(found.values(), key=lambda m: (m.valid_from, m.created_at, m.id))
@@ -508,7 +523,24 @@ class MemoryService:
                     kind=Kind.FACT,
                     min_similarity=profile.candidate_threshold,
                 )
-                return [hit for hit in hits if hit.memory.id != memory.id][:CANDIDATE_LIMIT]
+                candidates = [hit for hit in hits if hit.memory.id != memory.id][:CANDIDATE_LIMIT]
+                if store.has_memories_without_vector(self._conn, self.workspace_id, space):
+                    # Un hecho guardado sin vector (el servicio estaba caído, o se usó otro
+                    # modelo) solo lo encuentra el texto. Sin esto no se propondría y las dos
+                    # versiones quedarían vigentes.
+                    found = {hit.memory.id for hit in candidates}
+                    by_text = retrieval.search_fts(
+                        self._conn,
+                        self.workspace_id,
+                        memory.content,
+                        k=CANDIDATE_LIMIT,
+                        at_ms=at_ms,
+                        kind=Kind.FACT,
+                        exclude_id=memory.id,
+                    )
+                    candidates += [hit for hit in by_text if hit.memory.id not in found]
+                    warnings.append(_without_vector_warning(self._embedder.model))
+                return candidates
         return retrieval.search_fts(
             self._conn,
             self.workspace_id,
@@ -552,6 +584,14 @@ def _warn_about_flags(result: RecallResult) -> RecallResult:
     if len(warnings) == len(result.warnings):
         return result
     return result.model_copy(update={"warnings": warnings})
+
+
+def _without_vector_warning(model: str) -> str:
+    return tr(
+        "Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para no "
+        "perderlas. Ejecuta `vigente reindex`.",
+        model=model,
+    )
 
 
 def _results(n: int) -> str:

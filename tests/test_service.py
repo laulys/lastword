@@ -191,7 +191,7 @@ class TestForget:
         clock.advance(days=1)
         v2 = supersede(service, v1.id, "Ana vive en Lisboa")
         other = remember(service, "El proyecto usa SQLite")
-        assert service.forget(v2.id) == [v1.id, v2.id]
+        assert service.forget(v2.id).deleted_ids == [v1.id, v2.id]
         for memory_id in (v1.id, v2.id):
             with pytest.raises(NotFoundError):
                 service.get(memory_id)
@@ -338,7 +338,7 @@ class TestLink:
         cases: list[tuple[str, str, type[Exception]]] = [
             (v2.id, episode.id, NotSupersedableError),  # la versión nueva debe ser un fact
             (other.id, other.id, NotSupersedableError),  # consigo misma
-            (other.id, v2.id, NotSupersedableError),  # v2 ya es la versión nueva de v1
+            (other.id, v2.id, InvalidValidityError),  # v2 empezó antes que el hecho a cerrar
             (v2.id, v1.id, NotSupersedableError),  # ciclo: v1 → v2 → v1
             (v1.id, other.id, AlreadySupersededError),  # v1 ya fue reemplazada
         ]
@@ -385,3 +385,52 @@ def test_reading_does_not_wait_for_another_writer(db_path: Path, clock: FakeCloc
     finally:
         writer.execute("ROLLBACK")
         writer.close()
+
+
+class TestDates:
+    @pytest.mark.parametrize("year_only", ["2024", " 2024 ", "20250301", "1735689600.5", 2024])
+    def test_a_bare_number_is_not_a_date(self, year_only: object) -> None:
+        """Pydantic lo leería como segundos desde 1970 y «2024» se guardaría como 1970."""
+        with pytest.raises(ValidationError, match="ISO 8601"):
+            NewMemory.model_validate({"content": "Ana vive en Madrid", "valid_from": year_only})
+        with pytest.raises(ValidationError, match="ISO 8601"):
+            RecallQuery.model_validate({"query": "Ana", "as_of": year_only})
+
+    @pytest.mark.parametrize(
+        "impossible",
+        ["0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00", "9999-12-31T23:59:59.999Z"],
+    )
+    def test_dates_at_the_edge_of_the_calendar_are_rejected(self, impossible: str) -> None:
+        with pytest.raises(ValidationError, match="fuera de rango"):
+            NewMemory.model_validate({"content": "Ana vive en Madrid", "valid_from": impossible})
+
+    def test_iso_dates_still_work(self, service: MemoryService) -> None:
+        dated = remember(service, "Ana vive en Madrid", valid_from="2024-03-01")
+        assert dated.valid_from.isoformat() == "2024-03-01T00:00:00+00:00"
+        late = remember(service, "Luis vive en Valencia", valid_from="9998-12-31T23:59:59.998Z")
+        assert supersede(service, late.id, "Luis vive en Lisboa").valid_from > late.valid_from
+
+
+def test_forget_says_so_when_another_connection_keeps_the_text_on_disk(
+    db_path: Path, clock: FakeClock
+) -> None:
+    """Con otra conexión leyendo, SQLite no puede vaciar el registro de cambios (WAL): el
+    borrado es efectivo, pero el texto sigue en ese archivo hasta que la conexión acabe."""
+    service = MemoryService.open(db_path, "test", clock=clock)
+    memory = remember(service, "Marta tiene una cita confidencial")
+    reader = sqlite3.connect(db_path, autocommit=True)
+    reader.execute("BEGIN")
+    reader.execute("SELECT count(*) FROM memories").fetchone()
+    try:
+        result = service.forget(memory.id)
+    finally:
+        reader.execute("ROLLBACK")
+        reader.close()
+    assert result.deleted_ids == [memory.id]
+    assert len(result.warnings) == 1 and "-wal" in result.warnings[0]
+    with pytest.raises(NotFoundError):
+        service.get(memory.id)
+    again = remember(service, "Otro dato")
+    assert service.forget(again.id).warnings == []  # sin lectores, el registro se vacía
+    service.close()
+    assert b"cita confidencial" not in disk_bytes(db_path)

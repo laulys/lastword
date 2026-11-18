@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
 from typer.testing import CliRunner, Result
 
+from vigente import store
 from vigente.cli import app
 
 runner = CliRunner()
@@ -43,7 +45,8 @@ def test_full_lifecycle(db_path: Path) -> None:
     found = ok(run(db_path, "search", "proyecto usa"))
     assert [hit["memory"]["id"] for hit in found["results"]] == [new_id]
 
-    assert ok(run(db_path, "forget", new_id, "--yes")) == {"deleted_ids": [old_id, new_id]}
+    forgotten = ok(run(db_path, "forget", new_id, "--yes"))
+    assert forgotten == {"deleted_ids": [old_id, new_id], "warnings": []}
 
     missing = run(db_path, "show", old_id)
     assert missing.exit_code == 1
@@ -134,6 +137,8 @@ def test_search_mode_from_the_environment_ignores_case(
     monkeypatch.setenv("VIGENTE_SEARCH_MODE", " Hybrid ")  # el servidor MCP también lo acepta
     ok(run(db_path, "add", "Ana vive en Madrid"))
     assert ok(run(db_path, "search", "Ana"))["mode"] == "fts_only"  # sin embeddings en los tests
+    monkeypatch.setenv("VIGENTE_SEARCH_MODE", "rapido")  # se lee de verdad: uno que no existe falla
+    assert run(db_path, "search", "Ana").exit_code == 2
 
 
 def test_unknown_search_mode_is_a_clear_usage_error(db_path: Path) -> None:
@@ -188,3 +193,48 @@ def test_supersede_can_replace_several_facts(db_path: Path) -> None:
     assert result["also_old"][0]["superseded_by_id"] == result["new"]["id"]
     human = run(db_path, "history", luis["id"], as_json=False)
     assert "Ana vive en Madrid" in human.stdout and "Lisboa" in human.stdout
+
+
+class TestClearErrors:
+    """Lo que antes acababa en un volcado interno de Python."""
+
+    def test_a_database_that_cannot_be_opened(self, tmp_path: Path) -> None:
+        result = run(tmp_path, "stats")  # --db apunta a una carpeta
+        assert result.exit_code == 1
+        assert json.loads(result.stderr)["code"] == "database"
+
+    def test_a_database_locked_by_another_process(
+        self, db_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ok(run(db_path, "init"))
+        monkeypatch.setattr(store, "BUSY_TIMEOUT_MS", 50)
+        writer = sqlite3.connect(db_path, autocommit=True)
+        writer.execute("BEGIN IMMEDIATE")
+        try:
+            result = run(db_path, "add", "Ana vive en Madrid")
+        finally:
+            writer.execute("ROLLBACK")
+            writer.close()
+        assert result.exit_code == 1
+        error = json.loads(result.stderr)
+        assert (error["code"], "ocupada" in error["message"]) == ("database", True)
+
+    @pytest.mark.parametrize("date", ["2024", "9999-12-31T23:59:59.999Z", "0001-01-01T00:00+05:00"])
+    def test_a_date_that_is_not_a_date(self, db_path: Path, date: str) -> None:
+        result = run(db_path, "add", "Ana vive en Madrid", "--valid-from", date)
+        assert result.exit_code == 2
+        assert json.loads(result.stderr)["code"] == "invalid_input"
+        assert run(db_path, "search", "Ana", "--as-of", date).exit_code == 2
+
+    def test_json_output_is_never_mixed_with_a_question(self, db_path: Path) -> None:
+        memory_id = ok(run(db_path, "add", "Ana vive en Madrid"))["memory"]["id"]
+        asked = run(db_path, "forget", memory_id, input="y\n")
+        assert asked.exit_code == 2
+        assert asked.stdout == ""
+        assert "--yes" in json.loads(asked.stderr)["message"]
+        assert ok(run(db_path, "show", memory_id))["id"] == memory_id  # no se borró
+
+    def test_forget_checks_the_id_before_asking(self, db_path: Path) -> None:
+        missing = run(db_path, "forget", "01J0000000000000000000000Z", as_json=False, input="y\n")
+        assert missing.exit_code == 1
+        assert "Borrar" not in missing.stdout

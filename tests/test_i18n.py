@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import string
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -113,7 +116,12 @@ def test_the_cli_speaks_english(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     runner = CliRunner()
     options = ["--db", str(tmp_path / "vigente.db"), "--workspace", "en"]
 
-    assert "Save a memory" in runner.invoke(cli.app, ["--help"]).stdout
+    # La ayuda se traduce al cargar el módulo, así que se pide en un proceso nuevo: en este,
+    # su idioma ya quedó fijado por el del sistema (el test fallaba en una máquina en español).
+    env = {**os.environ, "VIGENTE_LANG": "en"}
+    command = [sys.executable, "-m", "vigente", "--help"]
+    shown = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+    assert "Save a memory" in shown.stdout
 
     added = runner.invoke(cli.app, [*options, "add", "The project uses SQLite"])
     assert added.exit_code == 0, added.output

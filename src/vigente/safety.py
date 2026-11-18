@@ -77,13 +77,16 @@ _SECRET_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     (
         "url_credentials",
         "una dirección con usuario y contraseña",
-        re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s/:@]+:[^\s/@]+@", re.IGNORECASE),
+        re.compile(r"\b[a-z][a-z0-9+.-]{0,20}://[^\s/:@]+:[^\s/@]+@", re.IGNORECASE),
     ),
 )
 
-# «la contraseña del wifi es …», «password: …», «API key = …». Se busca sin tildes.
+# «la contraseña del wifi es …», «password: …», «API key = …», y también con nombre de variable:
+# «DB_PASSWORD=…», «DJANGO_SECRET_KEY=…». Se busca sin tildes.
 _PASSWORD_PHRASE = re.compile(
-    r"\b(?:contrasena|password|passwd|pwd|passphrase|clave|token|secreto|secret|api[ _-]?key)s?\b"
+    r"(?<![A-Za-z0-9_?&#])(?:[A-Za-z0-9]+_){0,4}"  # no un parámetro de URL: van aparte
+    r"(?:contrasena|password|passwd|pwd|passphrase|clave|token|secreto|secret|api[ _-]?key)s?"
+    r"(?:_(?:key|token|secret|password|passwd|pwd))?\b"
     r"(?:\s+(?:de|del|para|of|for)\s+(?:[^\s:=]+\s+){0,3}?[^\s:=]+)?"
     r"\s*(?:\bes\b|\bera\b|\bis\b|:|=)\s*[\"'«“]?(?P<value>[^\s\"'»”]{6,})",
     re.IGNORECASE,
@@ -95,13 +98,24 @@ _TOKEN = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=
 _MIN_TOKEN_ENTROPY = 4.0  # bits por carácter; 40 caracteres aleatorios rondan los 5
 # Las rutas de una URL parecen tokens largos (en LongMemEval, casi todos los falsos avisos):
 # dentro de una URL solo cuentan los parámetros con nombre de secreto.
-_URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s<>\"'«»]+", re.IGNORECASE)
+_URL = re.compile(r"\b[a-z][a-z0-9+.-]{0,20}://[^\s<>\"'«»]+", re.IGNORECASE)
 _SECRET_QUERY = re.compile(
     r"[?&#](?:access_token|refresh_token|client_secret|api_?key|token|key|secret|sig|signature|"
     r"password|pwd|auth)=(?P<value>[^&#\s]{16,})",
     re.IGNORECASE,
 )
 _FINGERPRINT = re.compile(r"(?:sha\d+|md5):$", re.IGNORECASE)  # huellas: públicas
+
+
+# Lo que no se ve y puede partir una palabra para que un detector no la reconozca. Solo se
+# quita para detectar: de estos, los que además se marcan o se rechazan están más arriba.
+_INVISIBLE = re.compile(
+    "[\u200b\u200c\u200d\u2060\ufeff"  # ancho cero
+    "\u00ad\u034f\u2061-\u2064"  # guion opcional, unión de grafemas, operadores invisibles
+    "\u200e\u200f\u202a-\u202e\u2066-\u2069"  # marcas y control bidireccional
+    "\ufe00-\ufe0f"  # selectores de variación
+    "\U000e0000-\U000e007f]"  # tags
+)
 
 
 def _strip_accents(text: str) -> str:
@@ -137,6 +151,7 @@ def _random_token(token: str) -> bool:
 
 def find_secrets(text: str) -> list[Finding]:
     """Un mismo secreto se informa una vez, con el formato más concreto que lo reconoce."""
+    text = _INVISIBLE.sub("", text)  # un carácter invisible en medio no esconde una clave
     findings: list[Finding] = []
     found: list[str] = []  # textos ya reconocidos
 
@@ -296,15 +311,12 @@ _INSTRUCTION_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ),
 )
 
-_INVISIBLE = re.compile(
-    "[\u200b\u200c\u200d\u2060\ufeff"  # ancho cero
-    "\u202a-\u202e\u2066-\u2069"  # control bidireccional
-    "\U000e0000-\U000e007f]"  # tags
-)
+_SPACES = re.compile(r"[ \t\u00a0]+")
 
 
 def _normalize(text: str) -> str:
-    return _strip_accents(_INVISIBLE.sub("", text)).lower()
+    """Sin invisibles, sin tildes, en minúsculas y con un solo espacio entre palabras."""
+    return _SPACES.sub(" ", _strip_accents(_INVISIBLE.sub("", text))).lower()
 
 
 def find_instructions(text: str) -> list[Finding]:

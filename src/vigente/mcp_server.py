@@ -1,4 +1,4 @@
-"""Servidor MCP de Vigente (transporte stdio).
+"""Servidor MCP de Vigente: por stdio y, con `--http`, por streamable HTTP (ADR-0009).
 
 - El workspace y la base de datos los fija la configuración del servidor, nunca el agente:
   ninguna herramienta acepta un workspace, así que un agente no puede leer otro.
@@ -14,8 +14,9 @@ from __future__ import annotations
 import argparse
 import hmac
 import os
+import sqlite3
 import sys
-from collections.abc import Awaitable, Callable, Iterator, MutableMapping
+from collections.abc import Awaitable, Callable, Iterator, MutableMapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated, Any, TypeVar
@@ -27,7 +28,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, ValidationError
 
-from vigente import __version__
+from vigente import __version__, store
 from vigente.config import Settings
 from vigente.embeddings import Embedder
 from vigente.errors import VigenteError
@@ -154,6 +155,7 @@ class SupersedeOutput(BaseModel):
 
 class ForgetOutput(BaseModel):
     deleted_ids: list[str]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class HistoryOutput(BaseModel):
@@ -202,6 +204,8 @@ def create_server(
             raise ToolError(exc.describe()) from exc
         except ValidationError as exc:
             raise ToolError(f"invalid_input: {describe_validation_error(exc)}") from exc
+        except sqlite3.Error as exc:  # por ejemplo, la base ocupada por otro proceso
+            raise ToolError(store.database_error(exc).describe()) from exc
 
     @server.tool(annotations=ADDITIVE)
     def remember(
@@ -339,9 +343,12 @@ def create_server(
 
         Úsalo solo si el usuario pide olvidar algo. Para datos que cambiaron, usa supersede.
         """
-        return run(
-            lambda memory_service: ForgetOutput(deleted_ids=memory_service.forget(memory_id))
-        )
+
+        def operation(memory_service: MemoryService) -> ForgetOutput:
+            result = memory_service.forget(memory_id)
+            return ForgetOutput(deleted_ids=result.deleted_ids, warnings=result.warnings)
+
+        return run(operation)
 
     @server.tool(annotations=READ_ONLY)
     def history(
@@ -397,31 +404,39 @@ class RequireToken:
     """Solo deja pasar las peticiones con `Authorization: Bearer <token>`.
 
     La comparación es en tiempo constante, para que el tiempo de respuesta no revele cuántos
-    caracteres del token acierta quien prueba.
+    caracteres del token acierta quien prueba. Solo pasa sin token el arranque y la parada
+    del propio servidor (`lifespan`).
     """
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         self._app = app
-        self._expected = f"Bearer {token}".encode()
+        self._token = token.encode()
+
+    def _authorized(self, scope: Scope) -> bool:
+        supplied = dict(scope.get("headers", [])).get(b"authorization", b"")
+        scheme, _, credentials = supplied.partition(b" ")
+        # El nombre del esquema no distingue mayúsculas (RFC 7235); el token sí.
+        return scheme.lower() == b"bearer" and hmac.compare_digest(credentials.strip(), self._token)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
-            supplied = dict(scope.get("headers", [])).get(b"authorization", b"")
-            if not hmac.compare_digest(supplied, self._expected):
-                body = b'{"error": "unauthorized"}'
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": 401,
-                        "headers": [
-                            (b"content-type", b"application/json"),
-                            (b"content-length", str(len(body)).encode()),
-                            (b"www-authenticate", b"Bearer"),
-                        ],
-                    }
-                )
-                await send({"type": "http.response.body", "body": body})
-                return
+        if scope["type"] == "websocket" and not self._authorized(scope):
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        if scope["type"] == "http" and not self._authorized(scope):
+            body = b'{"error": "unauthorized"}'
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
         await self._app(scope, receive, send)
 
 
@@ -432,22 +447,47 @@ def create_http_app(
     embedder: Embedder | None = None,
     clock: Clock = utc_now,
     host: str = "127.0.0.1",
+    allowed_hosts: Sequence[str] = (),
 ) -> ASGIApp:
-    """El servidor MCP por streamable HTTP, en /mcp, protegido con un token."""
+    """El servidor MCP por streamable HTTP, en /mcp, protegido con un token.
+
+    `allowed_hosts`: nombres públicos con los que llegan las peticiones cuando hay un proxy
+    HTTPS delante (`memoria.example.com`).
+    """
     if len(token) < MIN_TOKEN_CHARS:
         raise ValueError(
             tr("{env} necesita al menos {n} caracteres", env=TOKEN_ENV, n=MIN_TOKEN_CHARS)
         )
     server = create_server(settings, embedder=embedder, clock=clock)
-    # En localhost se mantiene la protección del SDK contra DNS rebinding (solo acepta Host
-    # locales). Fuera, ese filtro rechazaría a los propios clientes: protege el token.
-    security = (
-        None
-        if host in LOOPBACK
-        else TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    app = server.streamable_http_app(
+        host=host, transport_security=_transport_security(host, allowed_hosts)
     )
-    app = server.streamable_http_app(host=host, transport_security=security)
     return RequireToken(app, token)
+
+
+def _transport_security(
+    host: str, allowed_hosts: Sequence[str]
+) -> TransportSecuritySettings | None:
+    """Qué cabeceras `Host` acepta el SDK (su protección contra DNS rebinding).
+
+    - En localhost y sin nombres permitidos: la del SDK, que solo acepta nombres locales.
+    - Con nombres permitidos: los locales y esos. Es el caso de un proxy HTTPS delante, que
+      reenvía la petición con el nombre público; sin esto el servidor la rechaza con un 421.
+    - Escuchando en la red y sin nombres: desactivada, porque rechazaría a los propios
+      clientes. Protege el token.
+    """
+    if not allowed_hosts:
+        if host in LOOPBACK:
+            return None
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+    for name in allowed_hosts:
+        hosts += [name, f"{name}:*"]
+        origins += [f"https://{name}", f"https://{name}:*"]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -462,6 +502,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--host", default="127.0.0.1", help=tr("Con --http: dirección de escucha."))
     parser.add_argument("--port", type=int, default=8765, help=tr("Con --http: puerto."))
+    parser.add_argument(
+        "--allowed-host",
+        action="append",
+        default=[],
+        metavar="HOST",
+        help=tr(
+            "Con --http: nombre público con el que llegan las peticiones si hay un proxy HTTPS "
+            "delante, por ejemplo memoria.example.com (se puede repetir)."
+        ),
+    )
     args = parser.parse_args(argv)
     token = os.environ.get(TOKEN_ENV, "")
     if args.http and len(token) < MIN_TOKEN_CHARS:
@@ -483,6 +533,8 @@ def main(argv: list[str] | None = None) -> None:
         MemoryService.open(settings.db_path, settings.workspace).close()
     except VigenteError as exc:
         sys.exit(f"vigente-mcp: {exc.code}: {exc.message}")
+    except sqlite3.Error as exc:
+        sys.exit(f"vigente-mcp: {store.database_error(exc).describe()}")
     except ValidationError as exc:
         error = describe_validation_error(exc)
         sys.exit(tr("vigente-mcp: configuración no válida: {error}", error=error))
@@ -498,7 +550,13 @@ def main(argv: list[str] | None = None) -> None:
                 ),
                 file=sys.stderr,
             )
-        app = create_http_app(settings, token=token, embedder=embedder, host=args.host)
+        app = create_http_app(
+            settings,
+            token=token,
+            embedder=embedder,
+            host=args.host,
+            allowed_hosts=args.allowed_host,
+        )
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     finally:
         if embedder is not None:

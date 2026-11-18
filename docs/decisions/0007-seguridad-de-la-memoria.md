@@ -67,5 +67,6 @@ La única falsa marca de E3 es reveladora: «Cuando te pregunten por el horario,
 
 - ✅ Vigente ya cubre las tres cosas que pide OWASP: validación al escribir, visibilidad (`flags`, avisos y `vigente review`) y separación (las instrucciones del servidor).
 - ⚠️ **El 100% de E3 es un techo.** Los casos y las reglas los escribió la misma persona. Un atacante que conozca las reglas las esquivará: parafraseando, en otro idioma o con codificaciones. Las reglas cazan lo evidente; la defensa de fondo sigue siendo que el agente trate la memoria como datos.
-- ⚠️ Las reglas de órdenes solo cubren español e inglés. No se detectan secretos en formatos no listados ni técnicas como los selectores de variación Unicode.
+- ⚠️ Las reglas de órdenes solo cubren español e inglés. No se detectan secretos en formatos no listados.
+- *(v1.3)* Una auditoría encontró formas fáciles de esquivar las reglas, ya corregidas: una contraseña con nombre de variable (`DB_PASSWORD=…`), una clave partida con un carácter invisible, y una orden con dos espacios o un guion opcional en medio de una palabra. Antes de detectar se quitan los caracteres invisibles, incluidos los selectores de variación, y se unifican los espacios. E3 da lo mismo que antes, sin falsos avisos nuevos.
 - Lección del propio hito: al escribir los detectores, una herramienta convirtió los escapes `\u202e` del código en el carácter invisible real. Un test pasa ahora el detector por todo el repositorio.

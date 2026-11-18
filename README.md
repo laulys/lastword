@@ -30,8 +30,8 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 
 - **Re-ranking by recency is not enough.** It removes outdated results, but then the first result is a different fact in half of the questions (51%).
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 questions from a public benchmark: without supersession, the old version of an updated fact ranks above the new one in **54–56%** of cases, with any search mode.
-- **[Scale](eval/results/scale.md):** with 200,000 memories, a search takes 37 ms and saving a fact 4 ms (8.5 ms and 1.3 ms with 50,000). Search compares compressed 1-bit vectors first and re-ranks the best 100 with the exact ones, with the same results as an exact search in E1 and E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Add about 15 ms for the embedding model.
-- **[A real agent](eval/results/agent_demo.md)** (Claude Code, four independent sessions sharing only Vigente) follows the protocol on its own: it searches before saving, links changes without duplicating facts, and answers with what is current.
+- **[Scale](eval/results/scale.md):** with 200,000 facts, a search takes 25 ms and saving a fact 26 ms (7 ms each with 50,000). Saving costs as much as searching because every new fact is compared with the current ones to propose replacements. Search compares compressed 1-bit vectors first and re-ranks the best candidates with the exact ones, with the same results as an exact search in E1 and E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Add about 13 ms for the embedding model.
+- **[A real agent](eval/results/agent_demo.md)** (Claude Code, four independent sessions sharing only Vigente) follows the protocol on its own: before saving a change it searches for the old fact, or it links the replacement that `remember` proposes; it does not duplicate facts, and it answers with what is current.
 - **[Exact codes](eval/results/e4_exact.md):** vector search already returns the right memory first for 36 of 36 questions that hinge on a code (error E-4031 vs E-4013, order 7781 vs 7718); text search alone gets 34. So no special mode was added.
 - **[Security](eval/results/e3_security.md):** the filters catch 40 of 40 secrets with no false alarms on 40 lookalikes (order numbers, hashes, «the key is in 1Password»), and flag 40 of 40 injected orders while marking 1 of 40 legitimate memories. The same author wrote the cases and the rules, so read it as a ceiling.
 
@@ -100,12 +100,14 @@ The workspace is fixed by the server configuration, so an agent cannot read anot
 
 ### Share it between computers
 
-`vigente-mcp --http` serves the same memory over HTTP, so other computers, a team or a cloud agent can share it. A token is required, and outside `localhost` it should sit behind HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
+`vigente-mcp --http` serves the same memory over HTTP, so other computers, a team or a cloud agent can share it. A token is required ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
 
 ```bash
 export VIGENTE_TOKEN=$(openssl rand -hex 32)
-VIGENTE_WORKSPACE=team uv run vigente-mcp --http --host 0.0.0.0 --port 8765
+VIGENTE_WORKSPACE=team uv run vigente-mcp --http --allowed-host memory.example.com
 ```
+
+It listens on `127.0.0.1:8765` only. Put an HTTPS proxy (Caddy, nginx or a tunnel) in front on the same machine, and name its public host with `--allowed-host`: without it, the server answers 421 to requests that arrive with that name. `--host 0.0.0.0` exposes the unencrypted port to the whole network, so use it only on a network you trust.
 
 Claude Code:
 

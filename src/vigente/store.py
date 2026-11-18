@@ -10,6 +10,7 @@ Reglas:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import time
@@ -22,7 +23,7 @@ from typing import Any
 
 import sqlite_vec
 
-from vigente.errors import ConfigError, SchemaVersionError
+from vigente.errors import ConfigError, DatabaseError, SchemaVersionError
 from vigente.i18n import tr
 from vigente.models import Kind, Memory, Status
 
@@ -91,6 +92,18 @@ _MIGRATIONS: tuple[str | Callable[[sqlite3.Connection], None], ...] = (
     """,
     # v4: búsqueda en dos pasos (ADR-0010). Se define más abajo: necesita Python.
     lambda conn: _two_stage_vectors(conn),
+    # v5: saber si a alguna memoria le falta el vector del modelo en uso se pregunta en cada
+    # búsqueda y al guardar. Sin índice recorría la tabla: 7 ms con 50.000 memorias.
+    """
+    CREATE INDEX memories_ws_embedding ON memories(workspace_id, embedding_model);
+    """,
+    # v6: al borrar una memoria, SQLite comprueba que ninguna otra la tenga en supersedes_id.
+    # Sin índice recorría la tabla por cada versión borrada: 3 s para olvidar un hecho con
+    # 10.000 versiones, frente a 0,2 s.
+    """
+    CREATE INDEX memories_supersedes ON memories(supersedes_id)
+        WHERE supersedes_id IS NOT NULL;
+    """,
 )
 LATEST_SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -150,7 +163,11 @@ def connect(path: str | Path) -> sqlite3.Connection:
     in_memory = str(path) == ":memory:"
     target = ":memory:" if in_memory else Path(path).expanduser()
     if isinstance(target, Path):
-        target.parent.mkdir(parents=True, exist_ok=True)
+        # La memoria es privada: la carpeta y el archivo nacen legibles solo para su dueño.
+        # SQLite crea después el WAL con los mismos permisos que el archivo.
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not target.exists() and target.parent.is_dir():
+            os.close(os.open(target, os.O_CREAT | os.O_RDWR, 0o600))
     conn = sqlite3.connect(target, autocommit=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -187,6 +204,16 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
                 raise
         time.sleep(pause)
         pause = min(pause * 2, 0.1)
+
+
+def database_error(exc: sqlite3.Error) -> DatabaseError:
+    """Un fallo de SQLite, contado a quien usa la CLI o el servidor en vez de volcarlo."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        return DatabaseError(
+            tr("La base de datos está ocupada por otro proceso. Vuelve a intentarlo.")
+        )
+    return DatabaseError(tr("Error de la base de datos: {error}", error=exc))
 
 
 @contextmanager
@@ -234,9 +261,18 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(f"PRAGMA user_version = {LATEST_SCHEMA_VERSION}")
 
 
-def checkpoint(conn: sqlite3.Connection) -> None:
-    """Vuelca el WAL al archivo principal y lo vacía (mejor esfuerzo si hay lectores)."""
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+CHECKPOINT_TIMEOUT_MS = 250  # cuánto espera un borrado a que los lectores suelten el WAL
+
+
+def checkpoint(conn: sqlite3.Connection) -> bool:
+    """Vuelca el WAL al archivo principal y lo vacía. Devuelve False si no pudo, porque otra
+    conexión está leyendo: lo borrado sigue entonces en el WAL hasta que esa conexión acabe."""
+    conn.execute(f"PRAGMA busy_timeout = {CHECKPOINT_TIMEOUT_MS}")
+    try:
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    finally:
+        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+    return not busy
 
 
 # --- escritura
@@ -391,9 +427,12 @@ def get_memory(conn: sqlite3.Connection, workspace_id: str, memory_id: str) -> M
 def predecessor_ids(conn: sqlite3.Connection, workspace_id: str, memory_id: str) -> list[str]:
     """Las versiones que `memory_id` reemplazó: una, o varias si unió varios hechos."""
     rows = conn.execute(
-        "SELECT id FROM memories WHERE workspace_id = ? AND superseded_by_id = ? "
-        "ORDER BY valid_from, seq",
-        (workspace_id, memory_id),
+        # INDEXED BY: sin él, SQLite elige el índice de fechas para ahorrarse el ORDER BY y
+        # recorre el workspace entero en cada llamada (7 s para el historial de un hecho con
+        # 10.000 versiones; con el índice, 0,1 s).
+        "SELECT id FROM memories INDEXED BY memories_superseded_by "
+        "WHERE superseded_by_id = ? AND workspace_id = ? ORDER BY valid_from, seq",
+        (memory_id, workspace_id),
     ).fetchall()
     return [str(row["id"]) for row in rows]
 
@@ -599,19 +638,21 @@ def _two_stage_vectors(conn: sqlite3.Connection) -> None:
         space_id, dim = int(row["id"]), int(row["dim"])
         _create_vector_tables(conn, space_id, dim)
         padding = sqlite_vec.serialize_float32([0.0] * (_bits(dim) - dim))
-        rows = conn.execute(
+        # Por lotes: con 200.000 memorias, cargarlas todas a la vez ocuparía casi 1 GB.
+        cursor = conn.execute(
             f"SELECT rowid, workspace_id, kind, valid_from, valid_to, embedding FROM {old}"
-        ).fetchall()
-        for seq, workspace_id, kind, valid_from, valid_to, embedding in rows:
-            conn.execute(
-                f"INSERT INTO vecx_{space_id} (seq, embedding) VALUES (?, ?)", (seq, embedding)
-            )
-            conn.execute(
-                f"INSERT INTO vecb_{space_id} "
-                "(rowid, workspace_id, kind, valid_from, valid_to, embedding) "
-                "VALUES (?, ?, ?, ?, ?, vec_quantize_binary(?))",
-                (seq, workspace_id, kind, valid_from, valid_to, bytes(embedding) + padding),
-            )
+        )
+        while rows := cursor.fetchmany(1000):
+            for seq, workspace_id, kind, valid_from, valid_to, embedding in rows:
+                conn.execute(
+                    f"INSERT INTO vecx_{space_id} (seq, embedding) VALUES (?, ?)", (seq, embedding)
+                )
+                conn.execute(
+                    f"INSERT INTO vecb_{space_id} "
+                    "(rowid, workspace_id, kind, valid_from, valid_to, embedding) "
+                    "VALUES (?, ?, ?, ?, ?, vec_quantize_binary(?))",
+                    (seq, workspace_id, kind, valid_from, valid_to, bytes(embedding) + padding),
+                )
         conn.execute(f"DROP TABLE {old}")
         conn.execute(
             "UPDATE embedding_spaces SET table_name = ? WHERE id = ?",
@@ -662,6 +703,7 @@ def vector_search(
     2. Reordenación de los candidatos con los vectores exactos.
 
     Si los filtros dejan menos de `RERANK_MIN` memorias, entran todas y el resultado es exacto.
+    Un vector guardado todo a ceros no tiene distancia coseno: se queda fuera, no rompe la búsqueda.
     """
     query = list(vector)
     exact = sqlite_vec.serialize_float32(query)
@@ -680,11 +722,11 @@ def vector_search(
         ranked AS (
             SELECT x.seq AS seq, vec_distance_cosine(x.embedding, ?) AS distance
             FROM candidates JOIN {space.exact} AS x ON x.seq = candidates.rowid
-            ORDER BY distance LIMIT ?
+            ORDER BY distance IS NULL, distance LIMIT ?
         )
         SELECT {_M_COLUMNS}, ranked.distance AS distance
         FROM ranked JOIN memories AS m ON m.seq = ranked.seq
-        WHERE m.workspace_id = ?
+        WHERE m.workspace_id = ? AND ranked.distance IS NOT NULL
         ORDER BY ranked.distance
     """
     rows = conn.execute(sql, params).fetchall()
@@ -710,14 +752,31 @@ def count_without_vector(
     return int(conn.execute(sql, (workspace_id,)).fetchone()[0])
 
 
-def has_memories_without_vector(conn: sqlite3.Connection, workspace_id: str, model: str) -> bool:
-    """¿Alguna memoria sin vector de `model`? (Guardada con el servicio caído, o de otro modelo.)
+def has_memories_without_vector(
+    conn: sqlite3.Connection, workspace_id: str, space: EmbeddingSpace
+) -> bool:
+    """¿Alguna memoria sin vector en `space`? (Guardada con el servicio caído, o con otro modelo.)
 
-    Recorre la tabla si no falta ninguno: 6 ms con 50.000 memorias (eval/results/scale.md).
+    `memories.embedding_model` es el modelo del último vector de cada memoria. Si la base solo
+    tiene un espacio vectorial, basta con esa columna, que tiene índice. Con varios (se cambió de
+    modelo, o el modelo cambió de dimensión) la columna no dice en qué espacios hay vector, y
+    se comprueba en el propio espacio, que es más lento.
     """
+    if _scalar(conn, "SELECT count(*) FROM embedding_spaces") == 1:
+        row = conn.execute(
+            # Tres búsquedas en el índice (workspace_id, embedding_model): un único
+            # `embedding_model IS NOT ?` lo recorrería entero.
+            "SELECT EXISTS (SELECT 1 FROM memories WHERE workspace_id = ?1 "
+            "AND embedding_model IS NULL) "
+            "OR EXISTS (SELECT 1 FROM memories WHERE workspace_id = ?1 AND embedding_model < ?2) "
+            "OR EXISTS (SELECT 1 FROM memories WHERE workspace_id = ?1 AND embedding_model > ?2)",
+            (workspace_id, space.model),
+        ).fetchone()
+        return bool(row[0])
     row = conn.execute(
-        "SELECT 1 FROM memories WHERE workspace_id = ? AND embedding_model IS NOT ? LIMIT 1",
-        (workspace_id, model),
+        f"SELECT 1 FROM memories AS m WHERE m.workspace_id = ? "
+        f"AND NOT EXISTS (SELECT 1 FROM {space.exact} AS x WHERE x.seq = m.seq) LIMIT 1",
+        (workspace_id,),
     ).fetchone()
     return row is not None
 
@@ -814,20 +873,24 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
                 )
             )
     # `memories.embedding_model` es el modelo del último vector calculado. Si dice que hay
-    # vector de un modelo, tiene que existir en el espacio más reciente de ese modelo.
-    latest = {space.model: space for space in embedding_spaces(conn)}
-    for space in latest.values():
+    # vector de un modelo, tiene que existir en alguno de los espacios de ese modelo (puede
+    # haber varios, si el modelo cambió de dimensión).
+    by_model: dict[str, list[EmbeddingSpace]] = {}
+    for space in embedding_spaces(conn):
+        by_model.setdefault(space.model, []).append(space)
+    for model, spaces in by_model.items():
+        missing_in_all = " ".join(
+            f"AND seq NOT IN (SELECT seq FROM {space.exact})" for space in spaces
+        )
         (claimed,) = conn.execute(
-            f"SELECT count(*) FROM memories WHERE embedding_model = ? "
-            f"AND seq NOT IN (SELECT seq FROM {space.exact})",
-            (space.model,),
+            f"SELECT count(*) FROM memories WHERE embedding_model = ? {missing_in_all}", (model,)
         ).fetchone()
         if claimed:
             problems.append(
                 tr(
                     "{n} memorias dicen tener vector de {model} y no lo tienen",
                     n=claimed,
-                    model=space.model,
+                    model=model,
                 )
             )
     return problems

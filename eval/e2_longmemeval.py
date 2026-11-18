@@ -220,7 +220,7 @@ def report(
         f"- Embeddings: `{EmbeddingSettings.from_env().model}`",
         f"- {len(items)} preguntas (sin las de abstención), {turns} mensajes de usuario guardados "
         f"como episodios ({truncated} recortados a {MAX_CONTENT_CHARS} caracteres). "
-        f"Tiempo total: {seconds / 60:.0f} min.",
+        f"Tiempo total: {seconds:.0f} s.",
         f"- Se responde después de todo el historial, como pide LongMemEval: en "
         f"{sum(answer_time(i) > i.question_date for i in items)} preguntas hay sesiones "
         "fechadas (menos de 24 h) después de la pregunta, y buscar en su fecha exacta "

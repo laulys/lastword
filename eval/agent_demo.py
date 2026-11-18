@@ -99,7 +99,7 @@ def report(sessions: list[Session], db_path: Path) -> str:
         "",
         f"- Fecha: {datetime.now(UTC):%Y-%m-%d}",
         f"- {claude_version()}, modelo `{sessions[0].model}`",
-        f"- Embeddings: `{EmbeddingSettings.from_env().model or 'ninguno (solo texto)'}`",
+        f"- Embeddings: `{EmbeddingSettings.from_env().model or 'ninguno (solo texto)'}` en Ollama",
         "",
     ]
     for number, session in enumerate(sessions, start=1):

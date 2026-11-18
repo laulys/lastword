@@ -30,8 +30,8 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 
 - **Reordenar por lo más reciente no basta.** Elimina los obsoletos, pero entonces el primer resultado es otro dato en la mitad de las preguntas (51%).
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 preguntas de un benchmark público: sin reemplazos, la versión vieja de un dato actualizado sale antes que la nueva en el **54–56%** de los casos, con cualquier modo de búsqueda.
-- **[Escala](eval/results/scale.md):** con 200.000 memorias, una búsqueda tarda 37 ms y guardar un hecho 4 ms (8,5 ms y 1,3 ms con 50.000). La búsqueda compara primero vectores comprimidos a 1 bit y reordena los 100 mejores con los exactos, con los mismos resultados que una búsqueda exacta en E1 y E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Hay que sumar unos 15 ms del modelo de embeddings.
-- **[Un agente real](eval/results/agent_demo.md)** (Claude Code, cuatro sesiones independientes que solo comparten Vigente) sigue el protocolo por su cuenta: busca antes de guardar, enlaza los cambios sin duplicar hechos y responde con lo vigente.
+- **[Escala](eval/results/scale.md):** con 200.000 hechos, una búsqueda tarda 25 ms y guardar un hecho 26 ms (7 ms cada una con 50.000). Guardar cuesta lo mismo que buscar porque cada hecho nuevo se compara con los vigentes para proponer reemplazos. La búsqueda compara primero vectores comprimidos a 1 bit y reordena los mejores candidatos con los exactos, con los mismos resultados que una búsqueda exacta en E1 y E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Hay que sumar unos 13 ms del modelo de embeddings.
+- **[Un agente real](eval/results/agent_demo.md)** (Claude Code, cuatro sesiones independientes que solo comparten Vigente) sigue el protocolo por su cuenta: antes de guardar un cambio busca el hecho viejo, o enlaza el reemplazo que le propone `remember`; no duplica hechos y responde con lo vigente.
 - **[Códigos exactos](eval/results/e4_exact.md):** la búsqueda por vectores ya devuelve primero la memoria correcta en 36 de 36 preguntas que dependen de un código (el error E-4031 frente al E-4013, el pedido 7781 frente al 7718); la de texto sola acierta 34. Por eso no se añadió ningún modo especial.
 - **[Seguridad](eval/results/e3_security.md):** los filtros detectan 40 de 40 secretos sin ningún falso aviso en 40 frases parecidas (números de pedido, hashes, «la clave está en 1Password»), y marcan 40 de 40 órdenes incrustadas frente a 1 de 40 memorias legítimas. Los casos y las reglas los escribió la misma persona: es un techo.
 
@@ -100,12 +100,14 @@ El workspace lo fija la configuración del servidor, así que un agente no puede
 
 ### Compartirla entre ordenadores
 
-`vigente-mcp --http` sirve la misma memoria por HTTP, para que la compartan otros ordenadores, un equipo o un agente en la nube. Exige un token y, fuera de `localhost`, conviene ponerlo detrás de HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
+`vigente-mcp --http` sirve la misma memoria por HTTP, para que la compartan otros ordenadores, un equipo o un agente en la nube. Exige un token ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
 
 ```bash
 export VIGENTE_TOKEN=$(openssl rand -hex 32)
-VIGENTE_WORKSPACE=equipo uv run vigente-mcp --http --host 0.0.0.0 --port 8765
+VIGENTE_WORKSPACE=equipo uv run vigente-mcp --http --allowed-host memoria.example.com
 ```
+
+Solo escucha en `127.0.0.1:8765`. Pon delante, en el mismo ordenador, un proxy HTTPS (Caddy, nginx o un túnel) e indica su nombre público con `--allowed-host`: sin eso, el servidor responde 421 a las peticiones que llegan con ese nombre. `--host 0.0.0.0` deja el puerto sin cifrar abierto a toda la red: úsalo solo en una red de confianza.
 
 Claude Code:
 

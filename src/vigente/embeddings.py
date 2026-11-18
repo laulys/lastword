@@ -132,8 +132,14 @@ class OpenAICompatibleEmbedder:
         self._batch_size = batch_size
         self._sleep = sleep
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        # Con un servicio local se ignoran HTTP_PROXY y ALL_PROXY: si no, httpx enviaría el
+        # texto de las memorias al proxy aunque la dirección sea localhost.
         self._client = httpx.Client(
-            base_url=base_url, timeout=timeout, headers=headers, transport=transport
+            base_url=base_url,
+            timeout=timeout,
+            headers=headers,
+            transport=transport,
+            trust_env=not is_local_url(base_url),
         )
 
     @property
@@ -223,4 +229,7 @@ def _parse(response: httpx.Response, *, expected: int) -> list[list[float]]:
         raise EmbeddingError(tr("El servicio devolvió un vector vacío."))
     if not all(math.isfinite(value) for vector in vectors for value in vector):
         raise EmbeddingError(tr("El servicio devolvió valores no numéricos (NaN o infinito)."))
+    if any(not any(vector) for vector in vectors):
+        # Un vector de ceros no tiene dirección: su distancia coseno a cualquier otro no existe.
+        raise EmbeddingError(tr("El servicio devolvió un vector nulo (todo ceros)."))
     return vectors

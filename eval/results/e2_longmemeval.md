@@ -4,7 +4,7 @@ Generado por `eval/e2_longmemeval.py` sobre `longmemeval_s_cleaned.json` (licenc
 
 - Fecha: 2026-11-18
 - Embeddings: `embeddinggemma`
-- 470 preguntas (sin las de abstención), 114894 mensajes de usuario guardados como episodios (429 recortados a 4000 caracteres). Tiempo total: 0 min.
+- 470 preguntas (sin las de abstención), 114894 mensajes de usuario guardados como episodios (429 recortados a 4000 caracteres). Tiempo total: 19 s.
 - Se responde después de todo el historial, como pide LongMemEval: en 69 preguntas hay sesiones fechadas (menos de 24 h) después de la pregunta, y buscar en su fecha exacta ocultaría esa evidencia con el filtro temporal.
 - Métricas por sesión: una sesión cuenta como encontrada si aparece alguno de sus mensajes. Solo se indexan mensajes del usuario: en *single-session-assistant* la evidencia está en las respuestas del asistente.
 

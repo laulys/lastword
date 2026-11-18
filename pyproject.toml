@@ -1,6 +1,6 @@
 [project]
 name = "vigente"
-version = "1.2.1"
+version = "1.3.0"
 description = "Memoria para agentes de IA que sabe qué sigue siendo verdad."
 readme = "README.md"
 license = "MIT"
@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.28.1",
     "mcp>=2.3.0",
     "pydantic>=2",
+    "rich>=13",  # la CLI lo importa directamente, no solo a través de Typer
     "sqlite-vec==0.1.9",
     "typer>=0.29.2",
     "uvicorn>=0.54.0",
