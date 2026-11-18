@@ -2,6 +2,14 @@
 
 What changed in each version of Vigente. Each one has its [release notes](https://github.com/laulys/vigente/releases), with measurements and upgrade instructions.
 
+## 1.3.1 · 2026-11-18
+
+Documentation only; the code does not change ([pull request](https://github.com/laulys/vigente/pull/10)).
+
+- The README presents memory security next to supersession: why it matters (OWASP ASI06) and what Vigente does on save, plus a new security and privacy section.
+- The README lists what is new since 1.0, with the version of each change, and every CLI command.
+- This changelog.
+
 ## 1.3.0 · 2026-11-18
 
 Fixes from a full audit of the code ([pull request](https://github.com/laulys/vigente/pull/9)).
