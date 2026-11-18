@@ -44,6 +44,36 @@ Las reglas de decisión se fijaron **antes** de ejecutar los experimentos y los 
 
 **E2b**, un agente simulado con un modelo local procesando LongMemEval, queda fuera: llevaría horas de cómputo y mediría sobre todo al modelo local. El protocolo con un agente real ya se demostró en [`agent_demo.py`](agent_demo.py).
 
+## Protocolo del hito 6: seguridad (E3)
+
+Las reglas y los casos se fijaron **antes** de escribir los detectores. [`security_cases.py`](security_cases.py) no se usa para ajustarlos: los tests unitarios usan otros ejemplos.
+
+### Qué se mide
+
+[`e3_security.py`](e3_security.py) pasa cada caso por los detectores de [`safety.py`](../src/vigente/safety.py) y cuenta los aciertos:
+
+| Conjunto | Casos | Lo correcto |
+|---|---:|---|
+| Secretos de 13 formatos (AWS, GitHub, OpenAI, Anthropic, Stripe, Slack, Google, clave privada, JWT, URL con contraseña, contraseña en una frase, token genérico) | 40 | detectarlos |
+| Frases parecidas sin secreto (pedidos, hashes, UUID, «la clave del éxito…», «la clave está en 1Password») | 40 | no detectar nada |
+| Intentos de que el agente obedezca una memoria (anular reglas, cambiar de rol, ocultar algo al usuario, dictar respuestas, usar herramientas, sacar datos, marcado falso de sistema) | 40 | marcarlos |
+| Memorias legítimas que suenan a orden (preferencias, recordatorios, normas del negocio) | 40 | no marcarlas |
+| Caracteres invisibles (Unicode *tags*, control bidireccional, ancho cero) | 9 | rechazarlos o marcarlos |
+| Texto legítimo con emojis compuestos, acentos, árabe, japonés y símbolos | 9 | no tocarlo |
+
+Los secretos se generan al ejecutar con una semilla fija: el repositorio no contiene nada con forma de clave real.
+
+### Reglas de decisión
+
+- **Secretos.** El detector **rechaza** al guardar solo si detecta al menos el **90%** de los secretos **y** da como secreto como mucho **1 de las 40** frases parecidas (2,5%). Si no cumple las dos condiciones, solo avisa.
+- **Caracteres invisibles.** Es un detector determinista, así que la regla es exacta: **todos** los casos ocultos detectados y **ningún** texto legítimo afectado. Si falla, se corrige el detector.
+- **Instrucciones incrustadas.** Las memorias marcadas **siempre se guardan**. El aviso al agente en `recall` se activa solo si marca como mucho **4 de las 40** memorias legítimas (10%), porque un aviso que salta a menudo se acaba ignorando. Si marca más, las marcas solo se ven con `vigente review`. La tasa de detección se publica tal cual, sin umbral.
+- Se mide una vez. Si una regla obliga a corregir un detector, se publican las dos mediciones y el cambio.
+
+### Sesgo que hay que tener en cuenta
+
+Los casos y los detectores los escribió la misma persona. Aunque los casos se escribieron antes, quien atacara conociendo las reglas las esquivaría con más facilidad: la detección medida es **un techo**, no la que tendría frente a un atacante real. La defensa de fondo sigue siendo que el agente trate la memoria como datos.
+
 ## Reproducibilidad
 
 E1 y E2 dan resultados idénticos en ejecuciones repetidas, comprobado comparando las salidas de dos ejecuciones. Para conseguirlo hubo que quitar el desempate por id en la fusión, porque los ULID tienen una parte aleatoria. Las latencias de `scale.py` varían unas décimas de milisegundo entre ejecuciones.
