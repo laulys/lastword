@@ -135,7 +135,7 @@ bearer_token_env_var = "VIGENTE_TOKEN"
 | `VIGENTE_ALLOW_REMOTE` | off | Required to send memories to a non-local service |
 | `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectors + text) or `text` |
 | `VIGENTE_TOKEN` | | Required by `vigente-mcp --http`; clients send it as a bearer token |
-| `VIGENTE_LANG` | system language | `en` or `es`: language of the CLI, its errors and `vigente doctor` |
+| `VIGENTE_LANG` | system language | `en` or `es`: language of what people read from `vigente` and `vigente-mcp` |
 
 If the embedding service is down, Vigente keeps working with text search and says so. `vigente reindex` fills in the missing vectors later.
 

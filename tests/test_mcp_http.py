@@ -108,13 +108,31 @@ def test_requests_without_the_token_are_refused(http_server: str) -> None:
     assert response.status_code == 401
 
 
-def test_http_refuses_to_start_without_a_long_token(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("lang", "expected"),
+    [("es", "hace falta VIGENTE_TOKEN"), ("en", "needs VIGENTE_TOKEN")],
+)
+def test_http_refuses_to_start_without_a_long_token(
+    tmp_path: Path, lang: str, expected: str
+) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "vigente.mcp_server", "--http", "--port", str(_free_port())],
-        env=_env(tmp_path, VIGENTE_TOKEN="corto"),
+        env=_env(tmp_path, VIGENTE_TOKEN="corto", VIGENTE_LANG=lang),
         capture_output=True,
         text=True,
         timeout=60,
     )
     assert result.returncode != 0
-    assert "VIGENTE_TOKEN" in result.stderr
+    assert expected in result.stderr
+
+
+def test_help_follows_the_language(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "vigente.mcp_server", "--help"],
+        env=_env(tmp_path, VIGENTE_LANG="en"),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0
+    assert "Serve over HTTP" in result.stdout
