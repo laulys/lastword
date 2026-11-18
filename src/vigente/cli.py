@@ -17,6 +17,8 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from vigente.config import DEFAULT_EMBED_MODEL, EmbeddingSettings
+from vigente.embeddings import DEFAULT_BASE_URL
 from vigente.errors import VigenteError
 from vigente.models import (
     Hit,
@@ -25,6 +27,7 @@ from vigente.models import (
     Memory,
     NewMemory,
     RecallQuery,
+    RecallResult,
     RememberResult,
     Status,
     SupersedeRequest,
@@ -45,6 +48,7 @@ err = Console(stderr=True)
 
 _KIND = {Kind.FACT: "hecho", Kind.EPISODE: "episodio"}
 _STATUS = {Status.ACTIVE: "activa", Status.SUPERSEDED: "reemplazada"}
+_SOURCES = {("fts",): "texto", ("vector",): "vector", ("fts", "vector"): "ambos"}
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,7 @@ class Options:
     db: Path
     workspace: str
     as_json: bool
+    embedding: EmbeddingSettings
 
 
 @app.callback()
@@ -67,8 +72,32 @@ def main(
         ),
     ] = DEFAULT_WORKSPACE,
     as_json: Annotated[bool, typer.Option("--json", help="Salida en JSON.")] = False,
+    embed_model: Annotated[
+        str,
+        typer.Option(
+            "--embed-model",
+            envvar="VIGENTE_EMBED_MODEL",
+            help="Modelo de embeddings (Ollama u otro servicio compatible con OpenAI). "
+            "'none' desactiva la búsqueda semántica.",
+        ),
+    ] = DEFAULT_EMBED_MODEL,
+    embed_url: Annotated[
+        str,
+        typer.Option(
+            "--embed-url",
+            envvar="VIGENTE_EMBED_BASE_URL",
+            help="URL del servicio de embeddings. Si no es local, exige VIGENTE_ALLOW_REMOTE=1.",
+        ),
+    ] = DEFAULT_BASE_URL,
 ) -> None:
-    ctx.obj = Options(db=db.expanduser(), workspace=workspace, as_json=as_json)
+    # La clave de API y el permiso de envío remoto solo se leen del entorno, nunca de
+    # argumentos: no deben quedar en el historial de la shell.
+    ctx.obj = Options(
+        db=db.expanduser(),
+        workspace=workspace,
+        as_json=as_json,
+        embedding=EmbeddingSettings.from_env(model=embed_model, base_url=embed_url),
+    )
 
 
 # --- infraestructura
@@ -108,8 +137,10 @@ def _describe(exc: ValidationError) -> str:
 def _service(ctx: typer.Context) -> Iterator[MemoryService]:
     options = _options(ctx)
     service: MemoryService | None = None
+    embedder = None
     try:
-        service = MemoryService.open(options.db, options.workspace)
+        embedder = options.embedding.build()
+        service = MemoryService.open(options.db, options.workspace, embedder=embedder)
         yield service
     except VigenteError as exc:
         _fail(options, exc.code, exc.message, current_id=exc.current_id)
@@ -118,6 +149,15 @@ def _service(ctx: typer.Context) -> Iterator[MemoryService]:
     finally:
         if service is not None:
             service.close()
+        if embedder is not None:
+            embedder.close()
+
+
+def _warn(ctx: typer.Context, warnings: list[str]) -> None:
+    """En modo humano, los avisos van a stderr; en JSON ya viajan dentro de la respuesta."""
+    if not _options(ctx).as_json:
+        for warning in warnings:
+            err.print(f"[yellow]Aviso:[/] {escape(warning)}")
 
 
 def _emit(
@@ -167,18 +207,28 @@ def _memory_table(memories: list[Memory], title: str | None = None) -> Table:
 
 
 def _hits_table(hits: list[Hit], title: str | None = None) -> Table:
-    """Muestra la posición, no el score: BM25 no es comparable entre consultas (está en --json)."""
+    """Muestra la posición, no el score: los scores no son comparables entre consultas.
+
+    El score y la similitud siguen disponibles con --json.
+    """
     table = _table(title)
     table.add_column("#", justify="right")
     table.add_column("id", style="dim", no_wrap=True)
     table.add_column("contenido", overflow="fold", min_width=20)
     table.add_column("vigencia (UTC)", max_width=12)
+    table.add_column("vía", no_wrap=True)
     for position, hit in enumerate(hits, start=1):
         content = escape(hit.memory.content)
         if hit.memory.status is Status.SUPERSEDED:
             content = f"[dim]{content}[/]"
-        table.add_row(str(position), hit.memory.id, content, _validity(hit.memory))
+        source = _SOURCES.get(tuple(hit.matched_by), "+".join(hit.matched_by))
+        table.add_row(str(position), hit.memory.id, content, _validity(hit.memory), source)
     return table
+
+
+def _render_recall(result: RecallResult) -> None:
+    mode = "texto + vectores" if result.mode == "hybrid" else "solo texto"
+    out.print(_hits_table(result.results, title=f"búsqueda: {mode}"))
 
 
 def _render_remember(result: RememberResult) -> None:
@@ -243,6 +293,7 @@ def add(
         )
         result = service.remember(request)
         _emit(ctx, result, lambda: _render_remember(result))
+        _warn(ctx, result.warnings)
 
 
 @app.command()
@@ -268,6 +319,7 @@ def supersede(
         )
         result = service.supersede(request)
         _emit(ctx, result, lambda: _render_supersede(result))
+        _warn(ctx, result.warnings)
 
 
 @app.command()
@@ -295,10 +347,22 @@ def search(
             }
         )
         result = service.recall(request)
+        _emit(ctx, result, lambda: _render_recall(result))
+        _warn(ctx, result.warnings)
+
+
+@app.command()
+def reindex(ctx: typer.Context) -> None:
+    """Calcula los vectores que falten con el modelo de embeddings configurado."""
+    with _service(ctx) as service:
+        result = service.reindex()
         _emit(
             ctx,
             result,
-            lambda: out.print(_hits_table(result.results, title=f"modo: {result.mode}")),
+            lambda: out.print(
+                f"[green]Vectores calculados:[/] {result.embedded} "
+                f"(modelo {escape(result.model)}, {result.dim or '?'} dimensiones)"
+            ),
         )
 
 

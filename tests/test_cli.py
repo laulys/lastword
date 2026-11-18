@@ -4,11 +4,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from typer.testing import CliRunner, Result
 
 from vigente.cli import app
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _without_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Los tests de la CLI no dependen de que Ollama esté corriendo."""
+    monkeypatch.setenv("VIGENTE_EMBED_MODEL", "none")
 
 
 def run(db_path: Path, *args: str, input: str | None = None, as_json: bool = True) -> Result:
@@ -86,3 +93,17 @@ def test_workspace_is_isolated_from_the_cli(db_path: Path) -> None:
     memory_id = ok(run(db_path, "add", "Ana vive en Madrid"))["memory"]["id"]
     other = runner.invoke(app, ["--db", str(db_path), "-w", "otro", "--json", "show", memory_id])
     assert other.exit_code == 1
+
+
+def test_refuses_remote_embedding_services_without_permission(db_path: Path) -> None:
+    result = run(
+        db_path, "--embed-model", "m", "--embed-url", "https://api.example.com/v1", "stats"
+    )
+    assert result.exit_code == 1, result.output
+    assert "VIGENTE_ALLOW_REMOTE" in result.output
+
+
+def test_reindex_without_a_model_is_a_config_error(db_path: Path) -> None:
+    result = run(db_path, "reindex")
+    assert result.exit_code == 1
+    assert json.loads(result.stderr)["code"] == "config"
