@@ -33,6 +33,6 @@ jobs:
           uv run --frozen ruff check .
           uv run --frozen ruff format --check .
       - name: Tipos
-        run: uv run --frozen mypy src tests eval
+        run: uv run --frozen mypy src tests eval demo
       - name: Tests (sin red ni modelos)
         run: uv run --frozen pytest
