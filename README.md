@@ -45,6 +45,17 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 
 The decision rules were fixed **before** measuring ([protocol](eval/README.md)), and E1 and E2 give identical results when re-run.
 
+## What's new since 1.0
+
+- **Security (1.1).** Secrets are rejected on save, hidden Unicode is rejected, and text that reads like an order to the agent is flagged. `vigente review` lists what is flagged.
+- **One fact replaces several (1.2).** «Ana and Luis moved to Lisbon» closes both their old cities in one step: `also_old_ids` in MCP, `--also` in the CLI. Since 1.3, another fact can be added later to the same replacement.
+- **Share it between computers (1.2).** `vigente-mcp --http` serves the memory to other machines, a team or a cloud agent, with a required token. Since 1.3, `--allowed-host` keeps it on localhost behind an HTTPS proxy.
+- **Faster search (1.2).** Two-stage vector search: about 9 times faster than exact search with 50,000 memories, with the same results.
+- **English or Spanish (1.2).** The CLI and `vigente-mcp` follow the system language or `VIGENTE_LANG`.
+- **Audited (1.3).** A full review of the code fixed, among others, a date bug and two privacy issues ([Security and privacy](#security-and-privacy)).
+
+Every version, in detail: [CHANGELOG.md](CHANGELOG.md).
+
 ## How it works
 
 - **One file.** SQLite holds the rows, a full-text index (FTS5) and a vector index (sqlite-vec). Every write or deletion is a single transaction across all three.
@@ -66,6 +77,21 @@ uv run vigente supersede <old-id> --by <new-id>
 uv run vigente search "¿qué base de datos usamos?"
 uv run vigente search "¿qué base de datos usamos?" --as-of 2026-06-01
 ```
+
+All CLI commands (`vigente --help` for their options):
+
+| Command | What it does |
+|---|---|
+| `add` | Saves a memory and proposes current facts it may replace |
+| `supersede` | Replaces one or more facts with their new version (`--by` links one already saved, `--also` adds more old facts) |
+| `search` | Searches what is true now, at a past date (`--as-of`) or across all versions (`--history`) |
+| `show`, `history` | One memory, or every version of a fact |
+| `list` | Lists memories, newest first, with filters |
+| `forget` | Deletes a fact and all its versions for good |
+| `review` | Lists flagged memories: possible orders to the agent, hidden characters or secrets |
+| `reindex` | Computes the vectors that are missing |
+| `doctor`, `stats` | Checks the database and its indexes; counts memories |
+| `init` | Creates the database and the workspace |
 
 ## Use it from an agent (MCP)
 

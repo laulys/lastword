@@ -45,6 +45,17 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 
 Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.md)), y E1 y E2 dan resultados idénticos al repetirlos.
 
+## Novedades desde la 1.0
+
+- **Seguridad (1.1).** Rechaza los secretos y los caracteres Unicode invisibles al guardar, y marca el texto que suena a orden para el agente. `vigente review` lista lo marcado.
+- **Un hecho reemplaza a varios (1.2).** «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos de una vez: `also_old_ids` en MCP, `--also` en la CLI. Desde la 1.3 se puede sumar otro hecho después al mismo reemplazo.
+- **Compartirla entre ordenadores (1.2).** `vigente-mcp --http` sirve la memoria a otros ordenadores, a un equipo o a un agente en la nube, con un token obligatorio. Desde la 1.3, `--allowed-host` la deja en localhost detrás de un proxy HTTPS.
+- **Búsqueda más rápida (1.2).** Búsqueda por vectores en dos pasos: unas 9 veces más rápida que la exacta con 50.000 memorias, con los mismos resultados.
+- **En inglés o en español (1.2).** La CLI y `vigente-mcp` siguen el idioma del sistema o `VIGENTE_LANG`.
+- **Auditada (1.3).** Una revisión completa del código corrigió, entre otros, un fallo con las fechas y dos problemas de privacidad ([Seguridad y privacidad](#seguridad-y-privacidad)).
+
+Cada versión, en detalle: [CHANGELOG.md](CHANGELOG.md) (en inglés).
+
 ## Cómo funciona
 
 - **Un solo archivo.** SQLite guarda las filas, un índice de texto (FTS5) y un índice vectorial (sqlite-vec). Cada escritura o borrado es una sola transacción sobre los tres.
@@ -66,6 +77,21 @@ uv run vigente supersede <id-viejo> --by <id-nuevo>
 uv run vigente search "¿qué base de datos usamos?"
 uv run vigente search "¿qué base de datos usamos?" --as-of 2026-06-01
 ```
+
+Todos los comandos de la CLI (`vigente --help` muestra sus opciones):
+
+| Comando | Qué hace |
+|---|---|
+| `add` | Guarda una memoria y propone hechos vigentes que podría reemplazar |
+| `supersede` | Reemplaza uno o varios hechos por su versión nueva (`--by` enlaza una ya guardada, `--also` añade más hechos viejos) |
+| `search` | Busca lo que es verdad ahora, en una fecha pasada (`--as-of`) o en todas las versiones (`--history`) |
+| `show`, `history` | Una memoria, o todas las versiones de un hecho |
+| `list` | Lista memorias, las más recientes primero, con filtros |
+| `forget` | Borra para siempre un hecho y todas sus versiones |
+| `review` | Lista las memorias marcadas: posibles órdenes al agente, caracteres ocultos o secretos |
+| `reindex` | Calcula los vectores que falten |
+| `doctor`, `stats` | Comprueba la base de datos y sus índices; cuenta memorias |
+| `init` | Crea la base de datos y el workspace |
 
 ## Usarlo desde un agente (MCP)
 
