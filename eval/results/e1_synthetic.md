@@ -35,10 +35,12 @@ Con la búsqueda por vectores, que pasa a ser la de por defecto tras este hito (
 | ingenua | vector | 48% | 97% | 0.69 | 51% |
 | ingenua | híbrida | 41% | 88% | 0.60 | 44% |
 | ingenua | híbrida ponderada | 47% | 95% | 0.66 | 47% |
+| ingenua | automática | 48% | 97% | 0.69 | 51% |
 | vigente | texto | 47% | 91% | 0.63 | 0% |
 | vigente | vector | 95% | 100% | 0.97 | 0% |
 | vigente | híbrida | 79% | 100% | 0.88 | 0% |
 | vigente | híbrida ponderada | 91% | 100% | 0.95 | 0% |
+| vigente | automática | 95% | 100% | 0.97 | 0% |
 
 ## Umbral de posibles reemplazos
 

@@ -1,0 +1,77 @@
+{
+  "model": "embeddinggemma",
+  "metrics": {
+    "texto": {
+      "recall@1": 0.9444444444444444,
+      "recall@5": 1.0,
+      "mrr": 0.9722222222222222
+    },
+    "vector": {
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0
+    },
+    "híbrida": {
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0
+    },
+    "automática": {
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0
+    }
+  },
+  "by_group": {
+    "texto": {
+      "errores": 1.0,
+      "pedidos": 1.0,
+      "facturas": 0.6,
+      "incidencias": 1.0,
+      "versiones": 1.0,
+      "productos": 1.0,
+      "envíos": 1.0
+    },
+    "vector": {
+      "errores": 1.0,
+      "pedidos": 1.0,
+      "facturas": 1.0,
+      "incidencias": 1.0,
+      "versiones": 1.0,
+      "productos": 1.0,
+      "envíos": 1.0
+    },
+    "híbrida": {
+      "errores": 1.0,
+      "pedidos": 1.0,
+      "facturas": 1.0,
+      "incidencias": 1.0,
+      "versiones": 1.0,
+      "productos": 1.0,
+      "envíos": 1.0
+    },
+    "automática": {
+      "errores": 1.0,
+      "pedidos": 1.0,
+      "facturas": 1.0,
+      "incidencias": 1.0,
+      "versiones": 1.0,
+      "productos": 1.0,
+      "envíos": 1.0
+    }
+  },
+  "gain_e4": 0.0,
+  "mrr_e1": {
+    "vector": 0.969250645994832,
+    "automática": 0.969250645994832
+  },
+  "mrr_e2": {
+    "vector": 0.9559979736575481,
+    "automática": 0.9559979736575481
+  },
+  "loss": {
+    "E1": 0.0,
+    "E2": 0.0
+  },
+  "adopt_auto": false
+}

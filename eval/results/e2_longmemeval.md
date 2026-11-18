@@ -16,17 +16,18 @@ Generado por `eval/e2_longmemeval.py` sobre `longmemeval_s_cleaned.json` (licenc
 | vector | 99% | 94% | 0.96 |
 | híbrida | 97% | 89% | 0.95 |
 | híbrida ponderada | 97% | 89% | 0.95 |
+| automática | 99% | 94% | 0.96 |
 
 ## Por tipo de pregunta (Recall@5 any)
 
-| Tipo | n | texto | vector | híbrida | híbrida ponderada |
-|---|---:|---:|---:|---:|---:|
-| knowledge-update | 72 | 100% | 100% | 100% | 100% |
-| multi-session | 121 | 94% | 99% | 98% | 98% |
-| single-session-assistant | 56 | 95% | 95% | 95% | 95% |
-| single-session-preference | 30 | 77% | 100% | 90% | 90% |
-| single-session-user | 64 | 100% | 100% | 100% | 100% |
-| temporal-reasoning | 127 | 94% | 99% | 96% | 96% |
+| Tipo | n | texto | vector | híbrida | híbrida ponderada | automática |
+|---|---:|---:|---:|---:|---:|---:|
+| knowledge-update | 72 | 100% | 100% | 100% | 100% | 100% |
+| multi-session | 121 | 94% | 99% | 98% | 98% | 99% |
+| single-session-assistant | 56 | 95% | 95% | 95% | 95% | 95% |
+| single-session-preference | 30 | 77% | 100% | 90% | 90% | 100% |
+| single-session-user | 64 | 100% | 100% | 100% | 100% | 100% |
+| temporal-reasoning | 127 | 94% | 99% | 96% | 96% | 99% |
 
 ## Actualizaciones: ¿qué versión aparece antes?
 
@@ -40,3 +41,4 @@ En las 72 preguntas de *knowledge-update* el historial contiene la versión viej
 | vector | 46% | 54% | 0% | 0% | 0% |
 | híbrida | 44% | 56% | 0% | 0% | 0% |
 | híbrida ponderada | 46% | 54% | 0% | 0% | 0% |
+| automática | 46% | 54% | 0% | 0% | 0% |

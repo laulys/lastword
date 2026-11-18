@@ -18,6 +18,7 @@ from typing import Any
 from charts import bar_chart
 from embedding_choice import DATA as HANDWRITTEN
 from embedding_choice import score_candidates
+from exact_cases import has_codes
 from metrics import cosine, f_beta, pct, rank_metrics
 from synthetic import Dataset, Distractor, Question, Version, generate
 
@@ -39,7 +40,7 @@ VECTOR_WEIGHT = 2.0  # variante «híbrida ponderada», fijada antes de ejecutar
 CURRENT_THRESHOLD = 0.51  # el del ADR-0004
 MAX_RECALL5_DROP = 0.02  # regla de la tesis
 THRESHOLDS = [round(0.30 + 0.01 * i, 2) for i in range(66)]
-MODES = ("texto", "vector", "híbrida", "híbrida ponderada")
+MODES = ("texto", "vector", "híbrida", "híbrida ponderada", "automática")  # automática: E4
 SYSTEMS = ("ingenua", "ingenua + recencia", "vigente")
 QUESTION_TYPES = ("presente", "con fecha", "todas")
 DEFAULT_MODE = "híbrida"  # el modo por defecto cuando se fijó el protocolo
@@ -108,6 +109,11 @@ def search(built: Built, question: Question, vector: list[float], mode: str) -> 
         hits = text_hits[:K]
     elif mode == "vector":
         hits = vector_hits[:K]
+    elif mode == "automática":  # vector, salvo que la pregunta traiga un código (E4)
+        if has_codes(question.text):
+            hits = retrieval.hybrid(text_hits, vector_hits, limit=K)
+        else:
+            hits = vector_hits[:K]
     else:
         weight = VECTOR_WEIGHT if mode == "híbrida ponderada" else 1.0
         hits = retrieval.hybrid(text_hits, vector_hits, limit=K, vector_weight=weight)
