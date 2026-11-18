@@ -12,6 +12,14 @@ When a fact changes, most agent memories either overwrite it or keep both versio
 - `as_of` returns what was true **at any past date**.
 - `history` shows how a fact changed.
 
+A memory that several agents share, and that lasts between sessions, is also an attack surface: OWASP lists *Memory & Context Poisoning* among the top risks of agentic applications ([ASI06](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/)). So Vigente also **guards what goes in**:
+
+- Secrets are rejected on save, never stored.
+- Hidden Unicode that can smuggle instructions is rejected.
+- Text that reads like an order to the agent is stored but flagged, and the agent is told never to follow a memory.
+
+These are deterministic rules, without an LLM, measured in [E3](eval/results/e3_security.md). Details in [Security and privacy](#security-and-privacy).
+
 It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP client can use it, and they can share the same memory. Everything lives in a single SQLite file.
 
 ![A real CLI session: a fact changes, Vigente proposes the replacement, and search returns what is true now or at a past date](demo/vigente.gif)
@@ -37,6 +45,17 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 
 The decision rules were fixed **before** measuring ([protocol](eval/README.md)), and E1 and E2 give identical results when re-run.
 
+## What's new since 1.0
+
+- **Security (1.1).** Secrets are rejected on save, hidden Unicode is rejected, and text that reads like an order to the agent is flagged. `vigente review` lists what is flagged.
+- **One fact replaces several (1.2).** «Ana and Luis moved to Lisbon» closes both their old cities in one step: `also_old_ids` in MCP, `--also` in the CLI. Since 1.3, another fact can be added later to the same replacement.
+- **Share it between computers (1.2).** `vigente-mcp --http` serves the memory to other machines, a team or a cloud agent, with a required token. Since 1.3, `--allowed-host` keeps it on localhost behind an HTTPS proxy.
+- **Faster search (1.2).** Two-stage vector search: about 9 times faster than exact search with 50,000 memories, with the same results.
+- **English or Spanish (1.2).** The CLI and `vigente-mcp` follow the system language or `VIGENTE_LANG`.
+- **Audited (1.3).** A full review of the code fixed, among others, a date bug and two privacy issues ([Security and privacy](#security-and-privacy)).
+
+Every version, in detail: [CHANGELOG.md](CHANGELOG.md).
+
 ## How it works
 
 - **One file.** SQLite holds the rows, a full-text index (FTS5) and a vector index (sqlite-vec). Every write or deletion is a single transaction across all three.
@@ -44,7 +63,7 @@ The decision rules were fixed **before** measuring ([protocol](eval/README.md)),
 - **The engine calls no LLM.** `remember` uses local embeddings (embeddinggemma via Ollama) to propose facts the new one may replace. The agent, which already is an LLM, decides. Proposals favour not missing a replacement (17 of 18 in the hand-written set), so statements on the same topic also get one; similarity cannot tell «this updates that» from «this adds detail», and [masking names and numbers did not help](docs/decisions/0004-modelo-de-embeddings.md).
 - **Forgetting is real.** `forget` deletes every version of a fact from the rows, both indexes and the disk. A test checks that the bytes are gone from the file.
 - **It degrades gracefully.** Without embeddings it searches by text. It refuses to send memories to a non-local service unless you allow it.
-- **It is safe to share between agents.** Secrets are rejected on save, and so is hidden Unicode that can smuggle instructions. Text that reads like an order to the agent is stored but flagged: `recall` warns the agent, and `vigente review` lists it ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)). These are rules, in Spanish and English: they catch the obvious, so the agent is also told to treat every memory as data, never as an instruction.
+- **It is safe to share between agents.** Secrets are rejected on save, and memories that read like orders are flagged ([Security and privacy](#security-and-privacy)).
 
 ## Quick start
 
@@ -58,6 +77,21 @@ uv run vigente supersede <old-id> --by <new-id>
 uv run vigente search "¿qué base de datos usamos?"
 uv run vigente search "¿qué base de datos usamos?" --as-of 2026-06-01
 ```
+
+All CLI commands (`vigente --help` for their options):
+
+| Command | What it does |
+|---|---|
+| `add` | Saves a memory and proposes current facts it may replace |
+| `supersede` | Replaces one or more facts with their new version (`--by` links one already saved, `--also` adds more old facts) |
+| `search` | Searches what is true now, at a past date (`--as-of`) or across all versions (`--history`) |
+| `show`, `history` | One memory, or every version of a fact |
+| `list` | Lists memories, newest first, with filters |
+| `forget` | Deletes a fact and all its versions for good |
+| `review` | Lists flagged memories: possible orders to the agent, hidden characters or secrets |
+| `reindex` | Computes the vectors that are missing |
+| `doctor`, `stats` | Checks the database and its indexes; counts memories |
+| `init` | Creates the database and the workspace |
 
 ## Use it from an agent (MCP)
 
@@ -125,6 +159,19 @@ bearer_token_env_var = "VIGENTE_TOKEN"
 
 > **If your client has its own memory**, the agent may save the same fact in both places, and only Vigente will know when it stops being true. In Claude Code you can turn its auto memory off with `"autoMemoryEnabled": false` in the project settings, or with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ([docs](https://code.claude.com/docs/en/memory)).
 
+## Security and privacy
+
+A memory that several agents share, and that lasts between sessions, has to be careful with what goes in and what goes out ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
+
+- **Nothing leaves your computer by default.** The memory is a local SQLite file, and embeddings come from a local model. Sending memories to a non-local embedding service requires `VIGENTE_ALLOW_REMOTE=1`, and system proxies are ignored for local addresses.
+- **The file is private.** It is created readable by its owner only (folder `0700`, file `0600`). It is not encrypted: disk encryption, such as FileVault or BitLocker, covers it.
+- **Secrets are not stored.** API keys in 10 known formats, passwords written in a sentence or as an environment variable, and random-looking tokens are rejected on save. The error never repeats the secret, and suggests saving where it lives instead. Only a person can override it, from the CLI with `--allow-secret`; MCP clients cannot.
+- **Memories are data, never instructions.** Hidden Unicode that can smuggle text is rejected. Text that reads like an order to the agent is stored but flagged: `recall` warns the agent, and `vigente review` lists it. The server tells the agent never to follow a memory. These are rules in Spanish and English: they catch the obvious, not an attacker who knows them, so [E3](eval/results/e3_security.md) is a ceiling.
+- **Forgetting erases.** `forget` deletes every version from the rows, the text index and both vector tables, and SQLite overwrites the freed space. If another connection is reading at that moment, the text stays in the `-wal` file until it closes, and `forget` says so.
+- **One agent, one workspace.** The server fixes the workspace; no tool accepts another one.
+- **Over HTTP, a token is required.** At least 32 characters, compared in constant time. The server stays on `127.0.0.1` behind an HTTPS proxy ([ADR-0009](docs/decisions/0009-compartir-por-http.md)).
+- **Audited.** A full review of the code fixed, in v1.3, two privacy issues among others: memory text could reach a system proxy, and the file was readable by other users of the computer ([pull request](https://github.com/laulys/vigente/pull/9)).
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -157,17 +204,6 @@ Each decision has an ADR with the alternatives considered (in Spanish):
 10. [Two-stage search: binary vectors, then an exact re-rank](docs/decisions/0010-busqueda-en-dos-pasos.md)
 
 The full design is in [docs/architecture.md](docs/architecture.md).
-
-## Related work
-
-Descriptions are based on each project's own documentation (checked November 2026).
-
-- **[Delfos](https://github.com/MiltMont/Delfos)** (Apache-2.0): graph-memory MCP server for codebases, with LLM-driven traversal of a Cue → Tag → Content graph and a C++ engine. It inspired this project. Vigente targets general facts that change over time, not code, and its engine calls no LLM.
-- **[Graphiti](https://github.com/getzep/graphiti)** (Apache-2.0) and **Zep**, the commercial service built on it: temporal context graphs that invalidate outdated facts instead of deleting them, with bi-temporal edges. They use an LLM to extract entities and a graph database (Neo4j, FalkorDB or Neptune). This is the closest idea. Vigente trades the graph and the LLM for a single SQLite file and decisions made by the client agent.
-- **[Mem0](https://github.com/mem0ai/mem0)** (Apache-2.0): a memory layer that uses an LLM to extract facts when adding. Since its April 2026 algorithm, extraction only adds memories, and the current state is resolved by time-aware retrieval. Vector store (Qdrant by default).
-- **[Letta](https://github.com/letta-ai/letta)**, formerly MemGPT (Apache-2.0): a platform for stateful agents that edit their own memory blocks through tools, with archival memory in a vector database.
-- **[MCP reference memory server](https://github.com/modelcontextprotocol/servers/tree/main/src/memory)** (MIT): a knowledge graph in a JSONL file, without versions or timestamps.
-- **[LongMemEval](https://github.com/xiaowu0162/LongMemEval)** (ICLR 2025, MIT): benchmark for long-term memory in chat assistants, used here in [E2](eval/results/e2_longmemeval.md).
 
 ## Development
 
