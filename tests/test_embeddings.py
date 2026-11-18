@@ -59,10 +59,10 @@ class TestRequests:
     def test_keeps_input_order_even_if_the_server_reorders(self) -> None:
         def reversed_answer(request: httpx.Request) -> httpx.Response:
             inputs = json.loads(request.content)["input"]
-            data = [{"index": i, "embedding": [float(i)]} for i in range(len(inputs))]
+            data = [{"index": i, "embedding": [float(i + 1)]} for i in range(len(inputs))]
             return httpx.Response(200, json={"data": data[::-1]})
 
-        assert embedder(reversed_answer).embed(["a", "b", "c"], "document") == [[0.0], [1.0], [2.0]]
+        assert embedder(reversed_answer).embed(["a", "b", "c"], "document") == [[1.0], [2.0], [3.0]]
 
     def test_splits_large_inputs_into_batches(self) -> None:
         recorder = Recorder()
@@ -114,6 +114,7 @@ class TestErrors:
             {"data": []},
             {"data": [{"embedding": []}]},
             {"data": [{"embedding": [float("nan")]}]},
+            {"data": [{"embedding": [0.0, 0.0, 0.0]}]},
             {"data": [[0.1, 0.2]]},
             {"data": {"a": 1}},
         ],

@@ -229,4 +229,7 @@ def _parse(response: httpx.Response, *, expected: int) -> list[list[float]]:
         raise EmbeddingError(tr("El servicio devolvió un vector vacío."))
     if not all(math.isfinite(value) for vector in vectors for value in vector):
         raise EmbeddingError(tr("El servicio devolvió valores no numéricos (NaN o infinito)."))
+    if any(not any(vector) for vector in vectors):
+        # Un vector de ceros no tiene dirección: su distancia coseno a cualquier otro no existe.
+        raise EmbeddingError(tr("El servicio devolvió un vector nulo (todo ceros)."))
     return vectors

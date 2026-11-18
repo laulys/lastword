@@ -662,6 +662,7 @@ def vector_search(
     2. Reordenación de los candidatos con los vectores exactos.
 
     Si los filtros dejan menos de `RERANK_MIN` memorias, entran todas y el resultado es exacto.
+    Un vector guardado todo a ceros no tiene distancia coseno: se queda fuera, no rompe la búsqueda.
     """
     query = list(vector)
     exact = sqlite_vec.serialize_float32(query)
@@ -680,11 +681,11 @@ def vector_search(
         ranked AS (
             SELECT x.seq AS seq, vec_distance_cosine(x.embedding, ?) AS distance
             FROM candidates JOIN {space.exact} AS x ON x.seq = candidates.rowid
-            ORDER BY distance LIMIT ?
+            ORDER BY distance IS NULL, distance LIMIT ?
         )
         SELECT {_M_COLUMNS}, ranked.distance AS distance
         FROM ranked JOIN memories AS m ON m.seq = ranked.seq
-        WHERE m.workspace_id = ?
+        WHERE m.workspace_id = ? AND ranked.distance IS NOT NULL
         ORDER BY ranked.distance
     """
     rows = conn.execute(sql, params).fetchall()

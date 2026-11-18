@@ -110,6 +110,7 @@ EN: dict[str, str] = {
     "Se esperaban {expected} vectores y llegaron {got}.": "Expected {expected} vectors and got {got}.",
     "El servicio devolvió un vector vacío.": "The service returned an empty vector.",
     "El servicio devolvió valores no numéricos (NaN o infinito).": "The service returned non-numeric values (NaN or infinity).",
+    "El servicio devolvió un vector nulo (todo ceros).": "The service returned a null vector (all zeros).",
     "Falta el nombre del modelo de embeddings.": "The embedding model name is missing.",
     "{url} no es una dirección local. Para enviar el contenido de las memorias a un servicio remoto, activa VIGENTE_ALLOW_REMOTE=1.": "{url} is not a local address. To send the content of memories to a remote service, set VIGENTE_ALLOW_REMOTE=1.",
     "El servicio devolvió vectores de dimensiones distintas.": "The service returned vectors of different dimensions.",

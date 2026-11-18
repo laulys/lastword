@@ -369,3 +369,16 @@ def test_memories_without_vectors_are_still_found(
     online.reindex()
     result = online.recall(RecallQuery(query="Ana Madrid"))
     assert (result.mode, result.warnings) == ("vector", [])
+
+
+def test_a_stored_null_vector_does_not_break_search(
+    conn: sqlite3.Connection, clock: FakeClock
+) -> None:
+    """Un vector de ceros no tiene distancia coseno. El cliente HTTP ya los rechaza, pero uno
+    guardado por otro proveedor no debe dejar el workspace sin búsqueda."""
+    broken = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder([0.0, 0.0, 0.0, 0.0]))
+    remember(broken, "Ana vive en Madrid")
+    healthy = MemoryService(conn, "test", clock=clock, embedder=FixedEmbedder([1.0, 0.0, 0.0, 0.0]))
+    luis = remember(healthy, "Luis vive en Valencia")
+    assert recall_ids(healthy, "dónde vive Luis") == [luis.id]
+    assert healthy.doctor() == []
