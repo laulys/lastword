@@ -15,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
     model_validator,
 )
 
@@ -73,13 +74,30 @@ class NewMemory(_Input):
 
 
 class SupersedeRequest(_Input):
+    """La versión nueva se indica de una de dos formas:
+
+    - `new_content`: se crea ahora (el agente ya sabía qué hecho cambiaba).
+    - `new_id`: ya se guardó con remember, que la propuso como reemplazo. Enlazarla evita
+      duplicar el hecho; su vigencia y demás datos son los de esa memoria.
+    """
+
     old_id: MemoryId
-    new_content: Content
+    new_content: Content | None = None
+    new_id: MemoryId | None = None
     valid_from: UtcDatetime | None = None
     reason: str | None = Field(default=None, max_length=500)
     tags: list[Tag] | None = Field(default=None, max_length=MAX_TAGS)  # None = hereda
     source: Source | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _exactly_one_new_version(self) -> Self:
+        if (self.new_content is None) == (self.new_id is None):
+            raise ValueError("indica new_content o new_id (uno de los dos)")
+        extras = (self.valid_from, self.tags, self.source, self.confidence)
+        if self.new_id is not None and any(value is not None for value in extras):
+            raise ValueError("con new_id, la vigencia y los demás datos son los de esa memoria")
+        return self
 
 
 class RecallQuery(_Input):
@@ -160,3 +178,13 @@ class ReindexResult(BaseModel):
 class Page(BaseModel):
     items: list[Memory]
     next_cursor: str | None
+
+
+def describe_validation_error(exc: ValidationError) -> str:
+    """Qué campo falló y por qué, sin repetir el valor enviado: puede ser el contenido de una
+    memoria y acabar en logs."""
+    parts = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error["loc"]) or "entrada"
+        parts.append(f"{location}: {error['msg']}")
+    return "; ".join(parts)

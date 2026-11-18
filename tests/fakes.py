@@ -10,6 +10,9 @@ from vigente.embeddings import ModelProfile, Purpose
 from vigente.errors import EmbeddingError
 from vigente.retrieval import STOPWORDS
 
+# Para FakeEmbedder, estas palabras significan lo mismo: «base de datos».
+DATABASE_WORDS = {"postgresql": "bd", "sqlite": "bd", "base": "bd", "datos": "bd"}
+
 
 class FakeEmbedder:
     """Bolsa de palabras con hashing.

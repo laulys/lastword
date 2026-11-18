@@ -7,16 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.fakes import FailingEmbedder, FakeEmbedder, FixedEmbedder
+from tests.fakes import DATABASE_WORDS, FailingEmbedder, FakeEmbedder, FixedEmbedder
 from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
 from vigente import store
 from vigente.errors import ConfigError, NotSupersedableError
-from vigente.models import Hit, Kind, Memory, NewMemory, RecallQuery
+from vigente.models import Hit, Kind, Memory, NewMemory, RecallQuery, SupersedeRequest
 from vigente.retrieval import reciprocal_rank_fusion
 from vigente.service import MemoryService
-
-# Para el embedder falso, estas palabras significan lo mismo: «base de datos».
-DATABASE_WORDS = {"postgresql": "bd", "sqlite": "bd", "base": "bd", "datos": "bd"}
 
 
 @pytest.fixture
@@ -284,3 +281,12 @@ class TestReviewFixes:
             (memory.id,),
         )
         assert any("dicen tener vector" in problem for problem in semantic.doctor())
+
+
+def test_linking_updates_the_vector_index(semantic: MemoryService, clock: FakeClock) -> None:
+    postgres = remember(semantic, "El proyecto usa PostgreSQL")
+    clock.advance(days=1)
+    sqlite = remember(semantic, "El proyecto usa SQLite")
+    semantic.supersede(SupersedeRequest(old_id=postgres.id, new_id=sqlite.id))
+    assert recall_ids(semantic, "base de datos") == [sqlite.id]
+    assert semantic.doctor() == []
