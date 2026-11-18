@@ -100,12 +100,14 @@ El workspace lo fija la configuración del servidor, así que un agente no puede
 
 ### Compartirla entre ordenadores
 
-`vigente-mcp --http` sirve la misma memoria por HTTP, para que la compartan otros ordenadores, un equipo o un agente en la nube. Exige un token y, fuera de `localhost`, conviene ponerlo detrás de HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
+`vigente-mcp --http` sirve la misma memoria por HTTP, para que la compartan otros ordenadores, un equipo o un agente en la nube. Exige un token ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
 
 ```bash
 export VIGENTE_TOKEN=$(openssl rand -hex 32)
-VIGENTE_WORKSPACE=equipo uv run vigente-mcp --http --host 0.0.0.0 --port 8765
+VIGENTE_WORKSPACE=equipo uv run vigente-mcp --http --allowed-host memoria.example.com
 ```
+
+Solo escucha en `127.0.0.1:8765`. Pon delante, en el mismo ordenador, un proxy HTTPS (Caddy, nginx o un túnel) e indica su nombre público con `--allowed-host`: sin eso, el servidor responde 421 a las peticiones que llegan con ese nombre. `--host 0.0.0.0` deja el puerto sin cifrar abierto a toda la red: úsalo solo en una red de confianza.
 
 Claude Code:
 

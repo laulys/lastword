@@ -20,6 +20,8 @@ from mcp.client.streamable_http import streamable_http_client
 from vigente.mcp_server import RequireToken
 
 TOKEN = "t" * 40
+PUBLIC_HOST = "memoria.example.com"
+SERVER = [sys.executable, "-m", "vigente.mcp_server"]
 
 
 async def _ok_app(scope: MutableMapping[str, Any], receive: Any, send: Any) -> None:
@@ -34,7 +36,9 @@ async def _ok_app(scope: MutableMapping[str, Any], receive: Any, send: Any) -> N
         ({}, 401),
         ({"Authorization": "Bearer otro-token-de-cuarenta-caracteres-xxxxx"}, 401),
         ({"Authorization": TOKEN}, 401),  # sin «Bearer»
+        ({"Authorization": f"Bearer {TOKEN.upper()}"}, 401),  # el token sí distingue mayúsculas
         ({"Authorization": f"Bearer {TOKEN}"}, 200),
+        ({"Authorization": f"bearer {TOKEN}"}, 200),  # el nombre del esquema, no (RFC 7235)
     ],
 )
 async def test_only_requests_with_the_token_get_through(
@@ -44,6 +48,27 @@ async def test_only_requests_with_the_token_get_through(
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/mcp", headers=headers)
     assert response.status_code == status
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("headers", "passes"), [([], False), ([(b"authorization", b"Bearer " + TOKEN.encode())], True)]
+)
+async def test_websockets_need_the_token_too(
+    headers: list[tuple[bytes, bytes]], passes: bool
+) -> None:
+    sent: list[MutableMapping[str, Any]] = []
+    reached: list[str] = []
+
+    async def inner(scope: MutableMapping[str, Any], receive: Any, send: Any) -> None:
+        reached.append(scope["type"])
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(message)
+
+    await RequireToken(inner, TOKEN)({"type": "websocket", "headers": headers}, None, send)  # type: ignore[arg-type]
+    assert bool(reached) is passes
+    assert sent == ([] if passes else [{"type": "websocket.close", "code": 1008}])
 
 
 @pytest.fixture
@@ -67,9 +92,9 @@ def _env(tmp_path: Path, **overrides: str) -> dict[str, str]:
 def http_server(tmp_path: Path) -> Iterator[str]:
     port = _free_port()
     process = subprocess.Popen(
-        [sys.executable, "-m", "vigente.mcp_server", "--http", "--port", str(port)],
+        [*SERVER, "--http", "--port", str(port), "--allowed-host", PUBLIC_HOST],
         env=_env(tmp_path),
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,  # una tubería sin leer podría llenarse y bloquear el servidor
     )
     url = f"http://127.0.0.1:{port}/mcp"
     try:
@@ -101,6 +126,27 @@ async def test_two_clients_share_one_memory_over_http(http_server: str) -> None:
     assert found.structured_content is not None
     contents = [hit["memory"]["content"] for hit in found.structured_content["results"]]
     assert contents == ["La entrega es el 25 de noviembre"]
+
+
+@pytest.mark.parametrize(("host", "status"), [(PUBLIC_HOST, 200), ("otro.example.com", 421)])
+def test_behind_a_proxy_only_the_allowed_host_gets_through(
+    http_server: str, host: str, status: int
+) -> None:
+    """Un proxy HTTPS delante reenvía la petición con su nombre público en `Host`. Enlazado
+    a localhost, el servidor solo la acepta si ese nombre se declaró con --allowed-host."""
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
+    headers = {"Host": host, "Authorization": f"Bearer {TOKEN}"}
+    headers["Accept"] = "application/json, text/event-stream"
+    assert httpx.post(http_server, json=initialize, headers=headers).status_code == status
 
 
 def test_requests_without_the_token_are_refused(http_server: str) -> None:

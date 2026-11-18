@@ -100,12 +100,14 @@ The workspace is fixed by the server configuration, so an agent cannot read anot
 
 ### Share it between computers
 
-`vigente-mcp --http` serves the same memory over HTTP, so other computers, a team or a cloud agent can share it. A token is required, and outside `localhost` it should sit behind HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
+`vigente-mcp --http` serves the same memory over HTTP, so other computers, a team or a cloud agent can share it. A token is required ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
 
 ```bash
 export VIGENTE_TOKEN=$(openssl rand -hex 32)
-VIGENTE_WORKSPACE=team uv run vigente-mcp --http --host 0.0.0.0 --port 8765
+VIGENTE_WORKSPACE=team uv run vigente-mcp --http --allowed-host memory.example.com
 ```
+
+It listens on `127.0.0.1:8765` only. Put an HTTPS proxy (Caddy, nginx or a tunnel) in front on the same machine, and name its public host with `--allowed-host`: without it, the server answers 421 to requests that arrive with that name. `--host 0.0.0.0` exposes the unencrypted port to the whole network, so use it only on a network you trust.
 
 Claude Code:
 

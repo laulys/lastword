@@ -13,7 +13,9 @@ El protocolo MCP tiene un transporte HTTP (*streamable HTTP*), y el SDK oficial 
 
 - **`vigente-mcp --http`** sirve la misma memoria en `/mcp`. Sin argumentos sigue funcionando por stdio, como hasta ahora.
 - **El token es obligatorio.** Sin `VIGENTE_TOKEN`, de al menos 32 caracteres, no arranca. Cada petición tiene que llevar `Authorization: Bearer <token>` o recibe un 401. La comparación es en tiempo constante, para que el tiempo de respuesta no revele cuánto del token se acierta.
-- **Por defecto solo escucha en el propio ordenador** (`127.0.0.1`), con la protección del SDK contra *DNS rebinding*. Para escuchar en la red hay que pedirlo (`--host`), y entonces avisa de que hay que ponerlo detrás de HTTPS. Fuera de `localhost` esa protección del SDK rechazaría a los propios clientes, así que se apaga, y protege el token.
+- **Por defecto solo escucha en el propio ordenador** (`127.0.0.1`), con la protección del SDK contra *DNS rebinding*, que solo acepta peticiones dirigidas a un nombre local.
+- **Con un proxy HTTPS delante, `--allowed-host` declara su nombre público.** El proxy reenvía la petición con ese nombre en la cabecera `Host`, y sin declararlo el servidor la rechaza con un 421. Es la configuración recomendada: el puerto sin cifrar no sale del ordenador. Se añadió en la v1.3, después de que una auditoría viera que la v1.2 solo funcionaba detrás de un proxy escuchando en toda la red.
+- **Para escuchar en la red hay que pedirlo** (`--host`), y entonces avisa de que el token viaja en claro si no hay HTTPS. Ahí la protección del SDK rechazaría a los propios clientes, así que se apaga, y protege el token.
 - **El workspace lo sigue fijando el servidor:** quien se conecta comparte ese workspace y no puede leer otro.
 - **Lo demás no cambia:** las mismas herramientas, las mismas instrucciones y los mismos filtros de seguridad (ADR-0007), que importan más cuando la memoria la comparten varias personas.
 

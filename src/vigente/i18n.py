@@ -131,6 +131,7 @@ EN: dict[str, str] = {
     "Servir por HTTP en /mcp. Exige {env}.": "Serve over HTTP at /mcp. Requires {env}.",
     "Con --http: dirección de escucha.": "With --http: address to listen on.",
     "Con --http: puerto.": "With --http: port.",
+    "Con --http: nombre público con el que llegan las peticiones si hay un proxy HTTPS delante, por ejemplo memoria.example.com (se puede repetir).": "With --http: public name the requests arrive with when an HTTPS proxy sits in front, for example memory.example.com (can be repeated).",
     "vigente-mcp: para servir por HTTP hace falta {env} con al menos {n} caracteres (por ejemplo, la salida de `openssl rand -hex 32`).": "vigente-mcp: serving over HTTP needs {env} with at least {n} characters (for example, the output of `openssl rand -hex 32`).",
     "vigente-mcp: configuración no válida: {error}": "vigente-mcp: invalid configuration: {error}",
     "vigente-mcp: escuchando fuera de este ordenador. Ponlo detrás de HTTPS: sin cifrado, el token viaja en claro.": "vigente-mcp: listening beyond this computer. Put it behind HTTPS: without encryption, the token travels in clear text.",
