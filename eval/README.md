@@ -69,6 +69,7 @@ Los secretos se generan al ejecutar con una semilla fija: el repositorio no cont
 - **Caracteres invisibles.** Es un detector determinista, así que la regla es exacta: **todos** los casos ocultos detectados y **ningún** texto legítimo afectado. Si falla, se corrige el detector.
 - **Instrucciones incrustadas.** Las memorias marcadas **siempre se guardan**. El aviso al agente en `recall` se activa solo si marca como mucho **4 de las 40** memorias legítimas (10%), porque un aviso que salta a menudo se acaba ignorando. Si marca más, las marcas solo se ven con `vigente review`. La tasa de detección se publica tal cual, sin umbral.
 - Se mide una vez. Si una regla obliga a corregir un detector, se publican las dos mediciones y el cambio.
+- **Ajuste tras probarlo con datos reales** (fuera del protocolo): con los 89.539 mensajes de usuario de LongMemEval, la primera versión rechazaba 38 como secreto, y 35 eran rutas de URL que parecían tokens. Se corrigió la regla de tokens: dentro de una URL solo cuentan los parámetros con nombre de secreto (`?token=`, `?key=`…), y las rutas absolutas, las huellas (`SHA256:…`) y los trozos de código no cuentan. Ahora rechaza 3, uno de ellos un token real dentro de una URL. E3 dio exactamente el mismo resultado antes y después.
 
 ### Sesgo que hay que tener en cuenta
 
@@ -87,4 +88,5 @@ uv run python eval/e1_synthetic.py
 uv run python eval/e2_longmemeval.py
 uv run python eval/decisions.py
 uv run python eval/scale.py                  # latencia y escala
+uv run python eval/e3_security.py            # seguridad; con LongMemEval descargado, también texto real
 ```
