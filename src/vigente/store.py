@@ -638,19 +638,21 @@ def _two_stage_vectors(conn: sqlite3.Connection) -> None:
         space_id, dim = int(row["id"]), int(row["dim"])
         _create_vector_tables(conn, space_id, dim)
         padding = sqlite_vec.serialize_float32([0.0] * (_bits(dim) - dim))
-        rows = conn.execute(
+        # Por lotes: con 200.000 memorias, cargarlas todas a la vez ocuparía casi 1 GB.
+        cursor = conn.execute(
             f"SELECT rowid, workspace_id, kind, valid_from, valid_to, embedding FROM {old}"
-        ).fetchall()
-        for seq, workspace_id, kind, valid_from, valid_to, embedding in rows:
-            conn.execute(
-                f"INSERT INTO vecx_{space_id} (seq, embedding) VALUES (?, ?)", (seq, embedding)
-            )
-            conn.execute(
-                f"INSERT INTO vecb_{space_id} "
-                "(rowid, workspace_id, kind, valid_from, valid_to, embedding) "
-                "VALUES (?, ?, ?, ?, ?, vec_quantize_binary(?))",
-                (seq, workspace_id, kind, valid_from, valid_to, bytes(embedding) + padding),
-            )
+        )
+        while rows := cursor.fetchmany(1000):
+            for seq, workspace_id, kind, valid_from, valid_to, embedding in rows:
+                conn.execute(
+                    f"INSERT INTO vecx_{space_id} (seq, embedding) VALUES (?, ?)", (seq, embedding)
+                )
+                conn.execute(
+                    f"INSERT INTO vecb_{space_id} "
+                    "(rowid, workspace_id, kind, valid_from, valid_to, embedding) "
+                    "VALUES (?, ?, ?, ?, ?, vec_quantize_binary(?))",
+                    (seq, workspace_id, kind, valid_from, valid_to, bytes(embedding) + padding),
+                )
         conn.execute(f"DROP TABLE {old}")
         conn.execute(
             "UPDATE embedding_spaces SET table_name = ? WHERE id = ?",
