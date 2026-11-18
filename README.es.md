@@ -205,17 +205,6 @@ Cada decisión tiene un ADR con las alternativas que se consideraron:
 
 El diseño completo está en [docs/architecture.md](docs/architecture.md).
 
-## Trabajo relacionado
-
-Las descripciones se basan en la documentación de cada proyecto (consultada en noviembre de 2026).
-
-- **[Delfos](https://github.com/MiltMont/Delfos)** (Apache-2.0): servidor MCP de memoria en grafo para repositorios de código, con un recorrido guiado por un LLM sobre un grafo Cue → Tag → Content y un motor en C++. Fue la inspiración de este proyecto. Vigente se centra en hechos generales que cambian con el tiempo, no en código, y su motor no llama a ningún LLM.
-- **[Graphiti](https://github.com/getzep/graphiti)** (Apache-2.0) y **Zep**, el servicio comercial construido sobre él: grafos de contexto temporales que invalidan los hechos obsoletos en vez de borrarlos, con aristas bitemporales. Usan un LLM para extraer entidades y una base de datos de grafos (Neo4j, FalkorDB o Neptune). Es la idea más cercana. Vigente cambia el grafo y el LLM por un único archivo SQLite y decisiones que toma el agente cliente.
-- **[Mem0](https://github.com/mem0ai/mem0)** (Apache-2.0): capa de memoria que usa un LLM para extraer hechos al guardar. Desde su algoritmo de abril de 2026, la extracción solo añade memorias, y el estado actual se resuelve con una recuperación que tiene en cuenta el tiempo. Almacén vectorial (Qdrant por defecto).
-- **[Letta](https://github.com/letta-ai/letta)**, antes MemGPT (Apache-2.0): plataforma de agentes con estado que editan sus propios bloques de memoria mediante herramientas, con una memoria de archivo en una base de datos vectorial.
-- **[Servidor de memoria de referencia de MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/memory)** (MIT): un grafo de conocimiento en un archivo JSONL, sin versiones ni fechas.
-- **[LongMemEval](https://github.com/xiaowu0162/LongMemEval)** (ICLR 2025, MIT): benchmark de memoria a largo plazo para asistentes conversacionales, usado aquí en [E2](eval/results/e2_longmemeval.md).
-
 ## Desarrollo
 
 ```bash

@@ -205,17 +205,6 @@ Each decision has an ADR with the alternatives considered (in Spanish):
 
 The full design is in [docs/architecture.md](docs/architecture.md).
 
-## Related work
-
-Descriptions are based on each project's own documentation (checked November 2026).
-
-- **[Delfos](https://github.com/MiltMont/Delfos)** (Apache-2.0): graph-memory MCP server for codebases, with LLM-driven traversal of a Cue → Tag → Content graph and a C++ engine. It inspired this project. Vigente targets general facts that change over time, not code, and its engine calls no LLM.
-- **[Graphiti](https://github.com/getzep/graphiti)** (Apache-2.0) and **Zep**, the commercial service built on it: temporal context graphs that invalidate outdated facts instead of deleting them, with bi-temporal edges. They use an LLM to extract entities and a graph database (Neo4j, FalkorDB or Neptune). This is the closest idea. Vigente trades the graph and the LLM for a single SQLite file and decisions made by the client agent.
-- **[Mem0](https://github.com/mem0ai/mem0)** (Apache-2.0): a memory layer that uses an LLM to extract facts when adding. Since its April 2026 algorithm, extraction only adds memories, and the current state is resolved by time-aware retrieval. Vector store (Qdrant by default).
-- **[Letta](https://github.com/letta-ai/letta)**, formerly MemGPT (Apache-2.0): a platform for stateful agents that edit their own memory blocks through tools, with archival memory in a vector database.
-- **[MCP reference memory server](https://github.com/modelcontextprotocol/servers/tree/main/src/memory)** (MIT): a knowledge graph in a JSONL file, without versions or timestamps.
-- **[LongMemEval](https://github.com/xiaowu0162/LongMemEval)** (ICLR 2025, MIT): benchmark for long-term memory in chat assistants, used here in [E2](eval/results/e2_longmemeval.md).
-
 ## Development
 
 ```bash
