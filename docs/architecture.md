@@ -1,6 +1,6 @@
 # Vigente — Arquitectura
 
-Estado: **aprobada** (18-11-2026). Hitos 1 y 2 implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
+Estado: **aprobada** (18-11-2026). Hitos 1, 2 y 3 implementados. Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
 
 ## 1. Resumen
 
@@ -142,6 +142,7 @@ CREATE VIRTUAL TABLE vec_1 USING vec0(
 - **Solo se reemplazan `fact`.** Los `episode` («el 3 de mayo decidimos X») son registros de algo que pasó y no dejan de ser verdad. Por eso un `episode` tampoco puede tener `valid_from` en el futuro. *(Hito 1)*
 - **«Vigente en t»** significa `valid_from <= t < valid_to`, igual para hechos y episodios. `status` solo indica si la memoria tiene sucesora; la búsqueda filtra por fechas. Así, un hecho con `valid_from` futuro («desde enero el responsable será Luis») no aparece hasta que empieza. *(Hito 1)*
 - **Reemplazar algo ya reemplazado** devuelve un error con el id de su sucesor actual, para que el agente reintente sobre la versión vigente. Evita bifurcar la cadena.
+- *(Hito 3)* **Enlazar en vez de crear:** `supersede` también acepta `new_id`, el id de una memoria ya guardada, normalmente la que `remember` acaba de guardar y que propuso como reemplazo. Sin esto, el flujo natural del agente dejaba el hecho duplicado. Reglas y alternativas en el [ADR-0005](decisions/0005-dos-formas-de-reemplazar.md).
 - **Olvidar** (`forget(id)`) borra **toda la cadena** del hecho (todas sus versiones) de `memories`, FTS y vector, y devuelve los ids borrados. Si alguien pide olvidar dónde vive, también debe desaparecer dónde vivía.
   - *(Hito 1)* Para que desaparezca también del disco:
     - `secure_delete=ON` sobrescribe las filas borradas.
@@ -174,12 +175,14 @@ Las fechas de entrada y salida van en ISO 8601. Los errores son estructurados (`
 
 | Herramienta | Entrada | Salida |
 |---|---|---|
-| `remember` | `content`, `kind="fact"`, `tags=[]`, `valid_from?`, `confidence?` | `memory`, `possible_supersedes: [{memory, score, matched_by}]` |
-| `recall` | `query`, `k=5` (máx. 50), `as_of?`, `include_history=false`, `kind?` | `mode`, `results: [...]` (§6), `warnings` |
-| `supersede` | `old_id`, `new_content`, `valid_from?`, `reason?` | `new`, `old` (con su `valid_to` cerrado), `warnings` |
-| `forget` | `id` | `deleted_ids: [...]` |
-| `history` | `id` | cadena ordenada de la versión más antigua a la más nueva |
-| `list_memories` | `kind?`, `status?`, `tag?`, `limit=20`, `cursor?` | `items`, `next_cursor` |
+| Herramienta (anotación MCP) | Entrada | Salida |
+|---|---|---|
+| `remember` (no destructiva) | `content`, `kind="fact"`, `tags?`, `valid_from?`, `confidence?` | `memory`, `possible_supersedes: [{memory, matched_by, similarity}]`, `next_step`, `warnings` |
+| `recall` (solo lectura) | `query`, `k=5` (máx. 50), `as_of?`, `include_history=false`, `kind?` | `mode`, `results: [...]`, `warnings` |
+| `supersede` (no destructiva) | `old_id` y **uno** de `new_content` / `new_id`; `reason?`; `valid_from?` (solo con `new_content`) | `new`, `old` (con su `valid_to` cerrado), `warnings` |
+| `forget` (**destructiva**) | `memory_id` | `deleted_ids: [...]` |
+| `history` (solo lectura) | `memory_id` | `versions`, de la más antigua a la vigente |
+| `list_memories` (solo lectura) | `kind?`, `status?`, `tag?`, `limit=20`, `cursor?` | `items`, `next_cursor` |
 
 **Cómo se detectan los «posibles reemplazos» en `remember`:**
 
@@ -187,6 +190,24 @@ Las fechas de entrada y salida van en ISO 8601. Los errores son estructurados (`
 - Sin embeddings: top-3 por BM25. Es una señal más débil y se documenta como limitación. *(Hito 1)* Ejemplo real: «Migramos a SQLite para el MVP» **no** propone «El proyecto usa PostgreSQL», porque no comparten palabras. Es justo el caso que deben resolver los embeddings del Hito 2. Con BM25, `score` no es comparable entre consultas.
 
 Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si `remember` devuelve un posible reemplazo que contradice lo nuevo, llama a `supersede` en vez de dejar ambos». También avisan de que el contenido devuelto son **datos guardados**, no instrucciones.
+
+**Implementación** *(Hito 3, [`mcp_server.py`](../src/vigente/mcp_server.py), SDK oficial `mcp` 2.x, transporte stdio)*:
+
+- **Instrucciones del servidor:** explican el protocolo (buscar antes de responder, reemplazar en vez de duplicar, `forget` solo si el usuario lo pide) y advierten que el contenido de las memorias son datos, nunca órdenes. Es una defensa contra memorias envenenadas con instrucciones.
+- **Vistas compactas:** el agente recibe solo los campos que le sirven (sin `workspace_id`, `source` ni el score de RRF), porque cada campo de la respuesta forma parte de su prompt.
+- **Anotaciones MCP:** `readOnlyHint` en las de lectura, `destructiveHint` solo en `forget` (en MCP, una herramienta que no es de solo lectura se considera destructiva por defecto) y `openWorldHint=false` en todas. Así el cliente puede pedir confirmación solo donde hace falta.
+- **Errores:** `ToolError` con el formato `código: mensaje`, más `(current_id: …)` cuando aplica. Los errores de validación dicen qué campo falló **sin repetir el valor enviado**, que puede ser el contenido de una memoria.
+- **Una conexión por llamada:** el SDK ejecuta las herramientas síncronas en un pool de hilos, y una conexión SQLite no debe compartirse entre hilos. Abrir y cerrar el servicio (conexión, carga de sqlite-vec, pragmas y comprobación de migraciones) cuesta 1,8 ms de mediana y 2,0 ms en p95 (300 mediciones sobre una base con 200 memorias, Apple Silicon). Abrirlo para leer no toma el bloqueo de escritura: el workspace solo se crea si no existe. El cliente HTTP de embeddings sí se comparte.
+- **stdout es el canal del protocolo:** nada escribe en stdout, y los logs del SDK van a stderr en nivel WARNING. A nivel INFO registraría los errores de validación con los valores de entrada, es decir, con contenido de memorias.
+- **Arranque:** `vigente-mcp` valida la configuración (base de datos, workspace, URL de embeddings) antes de aceptar conexiones y, si algo falla, termina con un mensaje claro en stderr.
+
+**Prueba con un agente real** *(Hito 3, [informe](../eval/results/agent_demo.md), `eval/agent_demo.py`)*. Cuatro sesiones independientes de Claude Code, que solo tienen las herramientas de Vigente. Ejecutada dos veces, con el mismo comportamiento las dos:
+
+- El agente **busca antes de guardar**, aunque nadie se lo pida en el mensaje.
+- Usa **los dos flujos de reemplazo** del ADR-0005. Cuando sabe qué cambia, hace `recall` y luego `supersede` con `new_content`. Cuando no, hace `remember`, recibe la propuesta y la enlaza con `supersede` con `new_id`.
+- **Rellena `valid_from` con una fecha futura** cuando el usuario anuncia un cambio («desde la semana que viene»). El hecho anterior sigue vigente hasta esa fecha.
+- **Escribe un `reason` útil**, y en una sesión posterior lo usa para explicar qué había antes.
+- Hallazgo de la prueba: si Claude Code tiene disponible su memoria de archivos, el agente también la usa y **duplica lo guardado en otro sistema que no sabe de reemplazos**. Para medir Vigente de forma aislada, la demo quita las herramientas propias de Claude Code (`--tools ""`). Para un usuario real es un aviso que conviene poner en el README del hito 5.
 
 ## 8. Plan de evaluación
 
