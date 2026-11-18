@@ -82,6 +82,12 @@ _MIGRATIONS: tuple[str, ...] = (
         UNIQUE (model, dim)
     );
     """,
+    # v3: un hecho nuevo puede reemplazar a varios (ADR-0008). Cada versión anterior apunta a
+    # su sucesora con superseded_by_id; este índice encuentra todas las de una versión nueva.
+    """
+    CREATE INDEX memories_superseded_by ON memories(superseded_by_id)
+        WHERE superseded_by_id IS NOT NULL;
+    """,
 )
 LATEST_SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -368,6 +374,16 @@ def get_memory(conn: sqlite3.Connection, workspace_id: str, memory_id: str) -> M
     return None if row is None else _to_memory(row)
 
 
+def predecessor_ids(conn: sqlite3.Connection, workspace_id: str, memory_id: str) -> list[str]:
+    """Las versiones que `memory_id` reemplazó: una, o varias si unió varios hechos."""
+    rows = conn.execute(
+        "SELECT id FROM memories WHERE workspace_id = ? AND superseded_by_id = ? "
+        "ORDER BY valid_from, seq",
+        (workspace_id, memory_id),
+    ).fetchall()
+    return [str(row["id"]) for row in rows]
+
+
 def fts_search(
     conn: sqlite3.Connection,
     workspace_id: str,
@@ -639,7 +655,7 @@ LEFT JOIN memories AS prv ON prv.id = m.supersedes_id
 WHERE (m.superseded_by_id IS NULL AND (m.status != 'active' OR m.valid_to != ?))
    OR (m.superseded_by_id IS NOT NULL AND (
           nxt.id IS NULL
-          OR nxt.supersedes_id IS NOT m.id
+          OR nxt.supersedes_id IS NULL
           OR nxt.valid_from != m.valid_to
           OR nxt.workspace_id != m.workspace_id
           OR m.status != 'superseded'))

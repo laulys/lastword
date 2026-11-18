@@ -279,8 +279,9 @@ def _render_remember(result: RememberResult) -> None:
 
 
 def _render_supersede(result: SupersedeResult) -> None:
-    out.print(f"[green]Reemplazada[/] {result.old.id} → {result.new.id}")
-    out.print(_memory_table([result.old, result.new]))
+    olds = [result.old, *result.also_old]
+    out.print(f"[green]Reemplazada[/] {', '.join(old.id for old in olds)} → {result.new.id}")
+    out.print(_memory_table([*olds, result.new]))
 
 
 # --- comandos
@@ -350,6 +351,12 @@ def supersede(
         str | None,
         typer.Option("--by", help="Id de una memoria ya guardada que pasa a ser la versión nueva."),
     ] = None,
+    also: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--also", help="Otro hecho que la versión nueva también reemplaza (se puede repetir)."
+        ),
+    ] = None,
     valid_from: Annotated[
         str | None, typer.Option(help="Desde cuándo es verdad lo nuevo (ISO 8601).")
     ] = None,
@@ -362,13 +369,14 @@ def supersede(
         ),
     ] = False,
 ) -> None:
-    """Reemplaza un hecho por su versión nueva, conservando el historial.
+    """Reemplaza uno o varios hechos por su versión nueva, conservando el historial.
 
     Con texto, crea la versión nueva. Con --by, enlaza una memoria que ya guardaste, por
-    ejemplo la que `add` acaba de proponer como reemplazo.
+    ejemplo la que `add` acaba de proponer como reemplazo. Con --also, la versión nueva
+    reemplaza además otros hechos.
     """
     with _service(ctx) as service:
-        fields: dict[str, object] = {"old_id": old_id, "reason": reason}
+        fields: dict[str, object] = {"old_id": old_id, "reason": reason, "also_old_ids": also or []}
         if by is not None:
             fields |= {"new_id": by, "new_content": new_content, "valid_from": valid_from}
         else:

@@ -98,15 +98,17 @@ def test_naive_datetimes_are_a_bug() -> None:
         store.to_ms(datetime(2026, 3, 1))
 
 
-def test_upgrades_a_database_from_the_previous_schema(db_path: Path) -> None:
+def test_upgrades_a_database_from_the_first_schema(db_path: Path) -> None:
     old = sqlite3.connect(db_path, autocommit=True)
     old.executescript(store._MIGRATIONS[0])
     old.execute("PRAGMA user_version = 1")
     old.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
     old.close()
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 2
+    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 3
     assert store.embedding_spaces(conn) == []
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(memories)")}
+    assert "memories_superseded_by" in indexes  # v3: varias versiones anteriores
     assert [tuple(row) for row in conn.execute("SELECT id FROM workspaces")] == [("test",)]
     conn.close()
 

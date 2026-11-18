@@ -154,96 +154,97 @@ class MemoryService:
     def supersede(
         self, request: SupersedeRequest, *, allow_secrets: bool = False
     ) -> SupersedeResult:
-        """Reemplaza un hecho vigente por uno nuevo sin editar ni borrar el anterior."""
+        """Reemplaza uno o varios hechos vigentes por uno nuevo, sin editar ni borrar nada."""
         safety.check_before_saving(
             [request.new_content, request.reason, request.source, *(request.tags or [])],
             allow_secrets=allow_secrets,
         )
         if request.new_id is not None:
-            return self._link(request.old_id, request.new_id, request.reason)
+            return self._link(request.old_ids, request.new_id, request.reason)
         assert request.new_content is not None  # lo garantiza SupersedeRequest
         content = request.new_content
         now = self._now()
         # Validar antes de llamar al servicio de embeddings: una petición que va a fallar no
         # debe esperar a la red. Se vuelve a validar dentro de la transacción por si cambió.
-        self._check_supersedable(self._require(request.old_id))
+        for old_id in request.old_ids:
+            self._check_supersedable(self._require(old_id))
         warnings: list[str] = []
         vector = self._embed(content, "document", warnings)
         with store.transaction(self._conn):
-            old = self._require(request.old_id)
-            self._check_supersedable(old)
+            olds = [self._require(old_id) for old_id in request.old_ids]
+            for old in olds:
+                self._check_supersedable(old)
+            latest_start = max(old.valid_from for old in olds)
             if request.valid_from is None:
-                # Sin fecha explícita: ahora, pero siempre después de que empezara la anterior.
-                valid_from = max(now, old.valid_from + _ONE_MS)
+                # Sin fecha explícita: ahora, pero siempre después de que empezaran las anteriores.
+                valid_from = max(now, latest_start + _ONE_MS)
             else:
                 valid_from = _truncate(request.valid_from)
-                if valid_from <= old.valid_from:
-                    raise InvalidValidityError(
-                        "La versión nueva debe empezar después de que empezara la anterior "
-                        f"({old.valid_from.isoformat()})."
-                    )
+                _check_starts_after(valid_from, latest_start)
+            primary = olds[0]
             new = Memory(
                 id=new_ulid(store.to_ms(now)),
                 workspace_id=self.workspace_id,
                 kind=Kind.FACT,
                 content=content,
-                tags=list(old.tags if request.tags is None else request.tags),
+                tags=list(primary.tags if request.tags is None else request.tags),
                 source=request.source,
                 confidence=request.confidence,
                 created_at=now,
                 valid_from=valid_from,
-                supersedes_id=old.id,
+                supersedes_id=primary.id,
                 supersede_reason=request.reason,
             )
             seq = store.insert_memory(self._conn, new)
             if vector is not None:
                 self._store_vector(seq, new, vector, now)
-            store.mark_superseded(
-                self._conn,
-                self.workspace_id,
-                old.id,
-                valid_to=valid_from,
-                superseded_by_id=new.id,
-            )
-            return SupersedeResult(
-                new=self._require(new.id), old=self._require(old.id), warnings=warnings
-            )
+            self._close(olds, new.id, valid_from)
+            return self._superseded(new.id, olds, warnings)
 
-    def _link(self, old_id: str, new_id: str, reason: str | None) -> SupersedeResult:
-        """Enlaza una memoria ya guardada como versión nueva de otra, sin duplicar el hecho."""
+    def _link(self, old_ids: list[str], new_id: str, reason: str | None) -> SupersedeResult:
+        """Enlaza una memoria ya guardada como versión nueva de otras, sin duplicar el hecho."""
         with store.transaction(self._conn):
-            old = self._require(old_id)
+            olds = [self._require(old_id) for old_id in old_ids]
             new = self._require(new_id)
-            self._check_supersedable(old)
+            for old in olds:
+                self._check_supersedable(old)
             if new.kind is not Kind.FACT:
                 raise NotSupersedableError("La versión nueva tiene que ser un fact.")
             if new.supersedes_id is not None:
                 raise NotSupersedableError(
                     f"{new.id} ya es la versión nueva de {new.supersedes_id}."
                 )
-            if any(memory.id == old.id for memory in self._chain(new)):
+            connected = {memory.id for memory in self._lineage(new)}
+            if any(old.id in connected for old in olds):
                 raise NotSupersedableError("Ese enlace crearía un ciclo en la cadena de versiones.")
-            if new.valid_from <= old.valid_from:
-                raise InvalidValidityError(
-                    "La versión nueva debe empezar después de que empezara la anterior "
-                    f"({old.valid_from.isoformat()})."
-                )
+            _check_starts_after(new.valid_from, max(old.valid_from for old in olds))
             store.set_supersedes(
-                self._conn, self.workspace_id, new.id, supersedes_id=old.id, reason=reason
+                self._conn, self.workspace_id, new.id, supersedes_id=olds[0].id, reason=reason
             )
+            self._close(olds, new.id, new.valid_from)
+            return self._superseded(new.id, olds)
+
+    def _close(self, olds: list[Memory], new_id: str, valid_to: datetime) -> None:
+        for old in olds:
             store.mark_superseded(
-                self._conn,
-                self.workspace_id,
-                old.id,
-                valid_to=new.valid_from,
-                superseded_by_id=new.id,
+                self._conn, self.workspace_id, old.id, valid_to=valid_to, superseded_by_id=new_id
             )
-            return SupersedeResult(new=self._require(new.id), old=self._require(old.id))
+
+    def _superseded(
+        self, new_id: str, olds: list[Memory], warnings: list[str] | None = None
+    ) -> SupersedeResult:
+        return SupersedeResult(
+            new=self._require(new_id),
+            old=self._require(olds[0].id),
+            also_old=[self._require(old.id) for old in olds[1:]],
+            warnings=warnings or [],
+        )
 
     def forget(self, memory_id: str) -> list[str]:
-        """Borra para siempre el hecho y todas sus versiones. Devuelve los ids borrados."""
+        """Borra para siempre el hecho y todas sus versiones, también las de los hechos que una
+        versión unió (ADR-0008). Devuelve los ids borrados."""
         with store.transaction(self._conn):
-            ids = [memory.id for memory in self._chain(self._require(memory_id))]
+            ids = [memory.id for memory in self._lineage(self._require(memory_id))]
             store.delete_memories(self._conn, self.workspace_id, ids)
         store.checkpoint(self._conn)
         return ids
@@ -289,9 +290,10 @@ class MemoryService:
         return self._require(memory_id)
 
     def history(self, memory_id: str) -> list[Memory]:
-        """Todas las versiones del hecho, de la más antigua a la vigente."""
+        """Todas las versiones del hecho, de la más antigua a la vigente. Si una versión unió
+        varios hechos, incluye también las de esos hechos (ADR-0008)."""
         with store.transaction(self._conn, write=False):
-            return self._chain(self._require(memory_id))
+            return self._lineage(self._require(memory_id))
 
     def recall(self, query: RecallQuery) -> RecallResult:
         """Busca según el modo configurado y avisa de los resultados marcados (ADR-0007)."""
@@ -410,26 +412,42 @@ class MemoryService:
                 "Solo los fact se pueden reemplazar; un episode registra algo que ya pasó."
             )
         if old.superseded_by_id is not None:
-            current = self._chain(old)[-1]
+            current = self._latest(old)
             raise AlreadySupersededError(
                 f"{old.id} ya fue reemplazada; la versión vigente es {current.id}.",
                 current_id=current.id,
             )
 
-    def _chain(self, memory: Memory) -> list[Memory]:
-        root = memory
+    def _latest(self, memory: Memory) -> Memory:
+        """La versión vigente de un hecho: sus sucesoras, hasta la última."""
+        current = memory
         for _ in range(MAX_CHAIN_LENGTH):
-            if root.supersedes_id is None:
-                break
-            root = self._require(root.supersedes_id)
-        else:
-            raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
-        chain = [root]
-        while chain[-1].superseded_by_id is not None:
-            if len(chain) >= MAX_CHAIN_LENGTH:
-                raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
-            chain.append(self._require(chain[-1].superseded_by_id))
-        return chain
+            if current.superseded_by_id is None:
+                return current
+            current = self._require(current.superseded_by_id)
+        raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
+
+    def _lineage(self, memory: Memory) -> list[Memory]:
+        """Todas las versiones conectadas por reemplazos, en orden de vigencia.
+
+        Hacia delante, cada versión tiene como mucho una sucesora. Hacia atrás puede haber
+        varias ramas: las de los hechos que una versión unió.
+        """
+        found = {memory.id: memory}
+        pending = [memory]
+        while pending:
+            current = pending.pop()
+            neighbours = store.predecessor_ids(self._conn, self.workspace_id, current.id)
+            if current.superseded_by_id is not None:
+                neighbours.append(current.superseded_by_id)
+            for neighbour_id in neighbours:
+                if neighbour_id in found:
+                    continue
+                if len(found) >= MAX_CHAIN_LENGTH:
+                    raise RuntimeError("Cadena de reemplazos demasiado larga o con un ciclo.")
+                found[neighbour_id] = self._require(neighbour_id)
+                pending.append(found[neighbour_id])
+        return sorted(found.values(), key=lambda m: (m.valid_from, m.created_at, m.id))
 
     def _embed(self, text: str, purpose: Purpose, warnings: list[str]) -> list[float] | None:
         """Un vector, o None si no hay embedder o el servicio falla (con aviso)."""
@@ -516,3 +534,11 @@ def _warn_about_flags(result: RecallResult) -> RecallResult:
 
 def _results(n: int) -> str:
     return "1 resultado contiene" if n == 1 else f"{n} resultados contienen"
+
+
+def _check_starts_after(valid_from: datetime, latest_start: datetime) -> None:
+    if valid_from <= latest_start:
+        raise InvalidValidityError(
+            "La versión nueva debe empezar después de que empezaran las anteriores "
+            f"({latest_start.isoformat()})."
+        )
