@@ -3,6 +3,8 @@ name = "vigente"
 version = "0.1.0"
 description = "Memoria para agentes de IA que sabe qué sigue siendo verdad."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "laulys20", email = "187386385+laulys@users.noreply.github.com" }
 ]
