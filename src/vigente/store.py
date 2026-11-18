@@ -10,6 +10,7 @@ Reglas:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import time
@@ -155,7 +156,11 @@ def connect(path: str | Path) -> sqlite3.Connection:
     in_memory = str(path) == ":memory:"
     target = ":memory:" if in_memory else Path(path).expanduser()
     if isinstance(target, Path):
-        target.parent.mkdir(parents=True, exist_ok=True)
+        # La memoria es privada: la carpeta y el archivo nacen legibles solo para su dueño.
+        # SQLite crea después el WAL con los mismos permisos que el archivo.
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not target.exists() and target.parent.is_dir():
+            os.close(os.open(target, os.O_CREAT | os.O_RDWR, 0o600))
     conn = sqlite3.connect(target, autocommit=True)
     conn.row_factory = sqlite3.Row
     try:

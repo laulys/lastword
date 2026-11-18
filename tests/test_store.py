@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 import sqlite3
+import stat
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -181,3 +183,15 @@ def test_text_search_scans_the_fts_index_first(conn: sqlite3.Connection) -> None
     query = next(sql for sql in captured if "memories_fts MATCH" in sql)
     plan = [row[3] for row in conn.execute("EXPLAIN QUERY PLAN " + query)]
     assert plan[0].startswith("SCAN memories_fts"), plan
+
+
+@pytest.mark.skipif(os.name != "posix", reason="permisos POSIX")
+def test_a_new_database_is_private_to_its_owner(tmp_path: Path) -> None:
+    """La memoria puede contener datos personales: otros usuarios del ordenador no la leen."""
+    path = tmp_path / "nueva" / "vigente.db"
+    conn = store.connect(path)
+    conn.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
+    conn.close()
+    modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in [path.parent, *path.parent.iterdir()]}
+    assert modes["nueva"] == 0o700
+    assert {mode for name, mode in modes.items() if name != "nueva"} == {0o600}
