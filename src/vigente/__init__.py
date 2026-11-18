@@ -1,3 +1,5 @@
 """Vigente: memoria para agentes de IA que sabe qué sigue siendo verdad."""
 
-__version__ = "0.1.0"
+from importlib.metadata import version
+
+__version__ = version("vigente")
