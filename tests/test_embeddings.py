@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from collections.abc import Callable
 
 import httpx
@@ -141,6 +142,33 @@ class TestPrivacy:
     )
     def test_local_services_are_allowed(self, url: str) -> None:
         OpenAICompatibleEmbedder("m", base_url=url).close()
+
+    def test_a_system_proxy_never_sees_requests_to_a_local_service(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """httpx usa HTTP_PROXY también para localhost: el texto de la memoria saldría hacia
+        el proxy aunque la dirección sea local."""
+        proxy = socket.socket()
+        proxy.bind(("127.0.0.1", 0))
+        proxy.listen(1)
+        proxy.settimeout(0.3)
+        unused = socket.socket()
+        unused.bind(("127.0.0.1", 0))
+        port = unused.getsockname()[1]
+        unused.close()
+        for name in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+            monkeypatch.setenv(name, f"http://127.0.0.1:{proxy.getsockname()[1]}")
+        for name in ("NO_PROXY", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        local = OpenAICompatibleEmbedder("m", base_url=f"http://localhost:{port}/v1")
+        try:
+            with pytest.raises(EmbeddingError, match="No se pudo conectar"):
+                local.embed(["una memoria privada"], "document")
+            with pytest.raises(TimeoutError):
+                proxy.accept()  # nadie llamó al proxy
+        finally:
+            local.close()
+            proxy.close()
 
     def test_remote_services_need_explicit_permission(self) -> None:
         with pytest.raises(ConfigError, match="VIGENTE_ALLOW_REMOTE"):

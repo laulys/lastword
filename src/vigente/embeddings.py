@@ -132,8 +132,14 @@ class OpenAICompatibleEmbedder:
         self._batch_size = batch_size
         self._sleep = sleep
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        # Con un servicio local se ignoran HTTP_PROXY y ALL_PROXY: si no, httpx enviaría el
+        # texto de las memorias al proxy aunque la dirección sea localhost.
         self._client = httpx.Client(
-            base_url=base_url, timeout=timeout, headers=headers, transport=transport
+            base_url=base_url,
+            timeout=timeout,
+            headers=headers,
+            transport=transport,
+            trust_env=not is_local_url(base_url),
         )
 
     @property
