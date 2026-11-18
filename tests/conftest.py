@@ -11,6 +11,13 @@ from vigente import store
 from vigente.service import MemoryService
 
 
+@pytest.fixture(autouse=True)
+def _spanish(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Los tests leen los mensajes en español, el idioma fuente, sea cual sea el de la máquina
+    (en la CI de GitHub, LANG es C.UTF-8 y saldrían en inglés)."""
+    monkeypatch.setenv("VIGENTE_LANG", "es")
+
+
 @pytest.fixture
 def clock() -> FakeClock:
     return FakeClock()

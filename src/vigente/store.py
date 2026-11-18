@@ -23,6 +23,7 @@ from typing import Any
 import sqlite_vec
 
 from vigente.errors import ConfigError, SchemaVersionError
+from vigente.i18n import tr
 from vigente.models import Kind, Memory, Status
 
 OPEN_END_MS = 253_402_300_799_999  # 9999-12-31T23:59:59.999Z
@@ -133,8 +134,10 @@ def from_ms(ms: int) -> datetime:
 def _load_sqlite_vec(conn: sqlite3.Connection) -> None:
     if not hasattr(conn, "enable_load_extension"):
         raise ConfigError(
-            "Este Python no permite cargar extensiones de SQLite y Vigente necesita sqlite-vec. "
-            "Usa un Python gestionado por uv."
+            tr(
+                "Este Python no permite cargar extensiones de SQLite y Vigente necesita "
+                "sqlite-vec. Usa un Python gestionado por uv."
+            )
         )
     conn.enable_load_extension(True)
     try:
@@ -205,8 +208,12 @@ def schema_version(conn: sqlite3.Connection) -> int:
 def _check_version(version: int) -> None:
     if version > LATEST_SCHEMA_VERSION:
         raise SchemaVersionError(
-            f"La base usa el esquema v{version}, más nuevo que el que conoce esta versión "
-            f"de Vigente (v{LATEST_SCHEMA_VERSION})."
+            tr(
+                "La base usa el esquema v{found}, más nuevo que el que conoce esta versión de "
+                "Vigente (v{known}).",
+                found=version,
+                known=LATEST_SCHEMA_VERSION,
+            )
         )
 
 
@@ -750,30 +757,32 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
         problems.append(f"SQLite quick_check: {quick}")
     broken_refs = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken_refs:
-        problems.append(f"{len(broken_refs)} referencias rotas entre memorias")
+        problems.append(tr("{n} referencias rotas entre memorias", n=len(broken_refs)))
     try:
         conn.execute("INSERT INTO memories_fts (memories_fts) VALUES ('integrity-check')")
     except sqlite3.DatabaseError as exc:
-        problems.append(f"índice de texto dañado: {exc}")
+        problems.append(tr("índice de texto dañado: {error}", error=exc))
     orphans = _scalar(
         conn, "SELECT count(*) FROM memories_fts WHERE rowid NOT IN (SELECT seq FROM memories)"
     )
     if orphans:
-        problems.append(f"{orphans} entradas del índice de texto sin memoria")
+        problems.append(tr("{n} entradas del índice de texto sin memoria", n=orphans))
     missing = _scalar(
         conn, "SELECT count(*) FROM memories WHERE seq NOT IN (SELECT rowid FROM memories_fts)"
     )
     if missing:
-        problems.append(f"{missing} memorias sin entrada en el índice de texto")
+        problems.append(tr("{n} memorias sin entrada en el índice de texto", n=missing))
     for (memory_id,) in conn.execute(_BROKEN_CHAINS_SQL, (OPEN_END_MS,)):
-        problems.append(f"cadena de reemplazos inconsistente en {memory_id}")
+        problems.append(tr("cadena de reemplazos inconsistente en {id}", id=memory_id))
     for space in embedding_spaces(conn):
         orphan_vectors = _scalar(
             conn,
             f"SELECT count(*) FROM {space.table} WHERE rowid NOT IN (SELECT seq FROM memories)",
         )
         if orphan_vectors:
-            problems.append(f"{orphan_vectors} vectores de {space.model} sin memoria")
+            problems.append(
+                tr("{n} vectores de {model} sin memoria", n=orphan_vectors, model=space.model)
+            )
         unpaired = _scalar(
             conn,
             f"SELECT (SELECT count(*) FROM {space.table} WHERE rowid NOT IN "
@@ -781,7 +790,13 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
             f"WHERE seq NOT IN (SELECT rowid FROM {space.table}))",
         )
         if unpaired:
-            problems.append(f"{unpaired} vectores de {space.model} sin su pareja exacta o binaria")
+            problems.append(
+                tr(
+                    "{n} vectores de {model} sin su pareja exacta o binaria",
+                    n=unpaired,
+                    model=space.model,
+                )
+            )
         stale = _scalar(
             conn,
             f"""
@@ -791,7 +806,13 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
             """,
         )
         if stale:
-            problems.append(f"{stale} vectores de {space.model} con metadatos desactualizados")
+            problems.append(
+                tr(
+                    "{n} vectores de {model} con metadatos desactualizados",
+                    n=stale,
+                    model=space.model,
+                )
+            )
     # `memories.embedding_model` es el modelo del último vector calculado. Si dice que hay
     # vector de un modelo, tiene que existir en el espacio más reciente de ese modelo.
     latest = {space.model: space for space in embedding_spaces(conn)}
@@ -803,6 +824,10 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
         ).fetchone()
         if claimed:
             problems.append(
-                f"{claimed} memorias dicen tener vector de {space.model} y no lo tienen"
+                tr(
+                    "{n} memorias dicen tener vector de {model} y no lo tienen",
+                    n=claimed,
+                    model=space.model,
+                )
             )
     return problems

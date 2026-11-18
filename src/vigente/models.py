@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 from vigente import safety
+from vigente.i18n import tr
 
 MAX_CONTENT_CHARS = 4000
 MAX_TAGS = 20
@@ -109,13 +110,13 @@ class SupersedeRequest(_Input):
     @model_validator(mode="after")
     def _exactly_one_new_version(self) -> Self:
         if (self.new_content is None) == (self.new_id is None):
-            raise ValueError("indica new_content o new_id (uno de los dos)")
+            raise ValueError(tr("indica new_content o new_id (uno de los dos)"))
         extras = (self.valid_from, self.tags, self.source, self.confidence)
         if self.new_id is not None and any(value is not None for value in extras):
-            raise ValueError("con new_id, la vigencia y los demás datos son los de esa memoria")
+            raise ValueError(tr("con new_id, la vigencia y los demás datos son los de esa memoria"))
         olds = [self.old_id, *self.also_old_ids]
         if len(set(olds)) != len(olds):
-            raise ValueError("old_id y also_old_ids no pueden repetir hechos")
+            raise ValueError(tr("old_id y also_old_ids no pueden repetir hechos"))
         return self
 
     @property
@@ -134,7 +135,7 @@ class RecallQuery(_Input):
     @model_validator(mode="after")
     def _history_excludes_as_of(self) -> Self:
         if self.include_history and self.as_of is not None:
-            raise ValueError("include_history y as_of no se pueden combinar")
+            raise ValueError(tr("include_history y as_of no se pueden combinar"))
         return self
 
 

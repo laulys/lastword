@@ -61,6 +61,7 @@ def main() -> None:
         env = inherited | {
             "VIGENTE_DB": str(Path(tmp) / "demo.db"),
             "VIGENTE_WORKSPACE": "demo",
+            "VIGENTE_LANG": "es",  # la demo está en español, sea cual sea el idioma del sistema
             "COLUMNS": str(COLS),
             "FORCE_COLOR": "1",
             "TERM": "xterm-256color",
