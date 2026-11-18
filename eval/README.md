@@ -33,6 +33,7 @@ Las reglas de decisión se fijaron **antes** de ejecutar los experimentos y los 
 - **Métricas por sesión:** Recall@5 *any* (alguna sesión con evidencia entre las 5 primeras), Recall@5 *all* (todas) y MRR.
 - **Modos comparados:** texto, vector, híbrida (RRF) e híbrida ponderada (vector ×2).
 - En las preguntas de *knowledge-update* (dos sesiones con evidencia, una vieja y una nueva) se mide **cuántas veces la búsqueda pone la vieja delante de la nueva**. Es el problema que resuelven los reemplazos, medido en un benchmark público.
+- **Ajuste descubierto al ejecutar** (no depende de los resultados): en 69 preguntas hay sesiones fechadas hasta 24 h después de la pregunta. Como LongMemEval responde después de todo el historial, se busca en la fecha más tardía entre la pregunta y su última sesión. Buscar en la fecha exacta ocultaría esa evidencia con el filtro temporal.
 
 ### Modo de búsqueda por defecto
 
@@ -42,6 +43,10 @@ Las reglas de decisión se fijaron **antes** de ejecutar los experimentos y los 
 ### Fuera de alcance
 
 **E2b**, un agente simulado con un modelo local procesando LongMemEval, queda fuera: llevaría horas de cómputo y mediría sobre todo al modelo local. El protocolo con un agente real ya se demostró en [`agent_demo.py`](agent_demo.py).
+
+## Reproducibilidad
+
+E1 y E2 dan resultados idénticos en ejecuciones repetidas, comprobado comparando las salidas de dos ejecuciones. Para conseguirlo hubo que quitar el desempate por id en la fusión, porque los ULID tienen una parte aleatoria. Las latencias de `scale.py` varían unas décimas de milisegundo entre ejecuciones.
 
 ## Cómo repetirlo
 

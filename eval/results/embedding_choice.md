@@ -39,14 +39,14 @@ Cada pregunta tiene una respuesta entre 38 memorias.
 |---|---|---:|---:|---:|
 | `qwen3-embedding:0.6b` | texto | 70% | 80% | 0.75 |
 | `qwen3-embedding:0.6b` | vector | 95% | 95% | 0.96 |
-| `qwen3-embedding:0.6b` | híbrida | 85% | 95% | 0.91 |
+| `qwen3-embedding:0.6b` | híbrida | 90% | 95% | 0.93 |
 | `embeddinggemma` | texto | 70% | 80% | 0.75 |
 | `embeddinggemma` | vector | 100% | 100% | 1.00 |
-| `embeddinggemma` | híbrida | 90% | 100% | 0.95 |
+| `embeddinggemma` | híbrida | 95% | 100% | 0.97 |
 
 ## 3. Preguntas sin respuesta y latencia
 
 | Modelo | Dim. | Similitud top-1 con respuesta: mínima / media | Sin respuesta: media / máxima | Latencia consulta p50 / p95 |
 |---|---:|---:|---:|---:|
-| `qwen3-embedding:0.6b` | 1024 | 0.36 / 0.66 | 0.46 / 0.58 | 19 / 25 ms |
-| `embeddinggemma` | 768 | 0.19 / 0.58 | 0.29 / 0.44 | 15 / 21 ms |
+| `qwen3-embedding:0.6b` | 1024 | 0.36 / 0.66 | 0.46 / 0.58 | 23 / 35 ms |
+| `embeddinggemma` | 768 | 0.19 / 0.58 | 0.29 / 0.44 | 13 / 22 ms |

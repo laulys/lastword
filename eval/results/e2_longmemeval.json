@@ -1,0 +1,10 @@
+{
+  "model": "embeddinggemma",
+  "questions": 470,
+  "mrr": {
+    "texto": 0.8822843251062736,
+    "vector": 0.9559979736575481,
+    "híbrida": 0.9468907009066584,
+    "híbrida ponderada": 0.9502744772957539
+  }
+}
