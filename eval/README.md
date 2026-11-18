@@ -84,6 +84,13 @@ Las evaluaciones anteriores apenas tenían consultas que dependieran de un códi
 - **Métricas:** Recall@1 y MRR.
 - **Regla:** el modo automático pasa a ser el de por defecto si **(a)** en E4 su MRR supera al de vector en al menos 0.05 **y (b)** en E1 y en E2 su MRR no queda más de 0.005 por debajo del de vector. Si no, se queda vector.
 
+## Protocolo: búsqueda en dos pasos
+
+La búsqueda por vectores era exacta y su coste crecía de forma lineal ([escala](results/scale.md)). La alternativa: buscar con los vectores comprimidos a 1 bit por dimensión (96 bytes en vez de 3 KB) para elegir candidatos, con los filtros dentro de la búsqueda, y reordenarlos con los vectores exactos.
+
+- **Prueba previa** con los 89.539 mensajes reales de LongMemEval y sus 470 preguntas: reordenando 100 candidatos se recupera el 97,9% del top 10 exacto, y el primer resultado coincide en el 100% de las preguntas. Recorrer los vectores binarios cuesta 5,5 ms; leer los candidatos exactos desde sqlite-vec, 15 ms, y desde una tabla SQLite normal, 0,1 ms. De ahí el diseño: binarios en sqlite-vec y exactos en una tabla normal.
+- **Regla:** se adopta si **(a)** el MRR de E1 y el de E2 no bajan más de 0.005 y **(b)** con 50.000 memorias, `recall` es al menos un 30% más rápido que la búsqueda exacta (p50 de [`scale.py`](scale.py)). Si no, se queda la exacta.
+
 ## Reproducibilidad
 
 E1 y E2 dan resultados idénticos en ejecuciones repetidas, comprobado comparando las salidas de dos ejecuciones. Para conseguirlo hubo que quitar el desempate por id en la fusión, porque los ULID tienen una parte aleatoria. Las latencias de `scale.py` varían unas décimas de milisegundo entre ejecuciones.

@@ -13,7 +13,7 @@ import json
 import re
 import sqlite3
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -30,7 +30,7 @@ BUSY_TIMEOUT_MS = 5000  # cuánto espera una conexión a que otra suelte la base
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _ONE_MS = timedelta(milliseconds=1)
 
-_MIGRATIONS: tuple[str, ...] = (
+_MIGRATIONS: tuple[str | Callable[[sqlite3.Connection], None], ...] = (
     # v1: esquema inicial
     """
     CREATE TABLE workspaces (
@@ -88,6 +88,8 @@ _MIGRATIONS: tuple[str, ...] = (
     CREATE INDEX memories_superseded_by ON memories(superseded_by_id)
         WHERE superseded_by_id IS NOT NULL;
     """,
+    # v4: búsqueda en dos pasos (ADR-0010). Se define más abajo: necesita Python.
+    lambda conn: _two_stage_vectors(conn),
 )
 LATEST_SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -217,7 +219,11 @@ def migrate(conn: sqlite3.Connection) -> None:
         current = schema_version(conn)  # otro proceso pudo migrar mientras esperábamos
         _check_version(current)
         for version in range(current + 1, LATEST_SCHEMA_VERSION + 1):
-            conn.executescript(_MIGRATIONS[version - 1])
+            step = _MIGRATIONS[version - 1]
+            if isinstance(step, str):
+                conn.executescript(step)
+            else:
+                step(conn)
         conn.execute(f"PRAGMA user_version = {LATEST_SCHEMA_VERSION}")
 
 
@@ -333,6 +339,7 @@ def delete_memories(conn: sqlite3.Connection, workspace_id: str, ids: Sequence[s
     conn.executemany("DELETE FROM memories_fts WHERE rowid = ?", [(seq,) for seq in seqs])
     for space in embedding_spaces(conn):
         conn.executemany(f"DELETE FROM {space.table} WHERE rowid = ?", [(seq,) for seq in seqs])
+        conn.executemany(f"DELETE FROM {space.exact} WHERE seq = ?", [(seq,) for seq in seqs])
     cursor = conn.execute(
         f"DELETE FROM memories WHERE workspace_id = ? AND id IN ({marks})",
         (workspace_id, *ids),
@@ -483,8 +490,9 @@ def _valid_to_ms(memory: Memory) -> int:
 
 # --- vectores
 
-_VECTOR_TABLE = re.compile(r"^vec_\d+$")
+_VECTOR_TABLE = re.compile(r"^vecb_\d+$")
 MAX_DIM = 8192
+RERANK_MIN = 100  # candidatos que se reordenan como mínimo (ADR-0010)
 
 
 @dataclass(frozen=True)
@@ -494,7 +502,12 @@ class EmbeddingSpace:
     id: int
     model: str
     dim: int
-    table: str
+    table: str  # vectores binarios en sqlite-vec, con los filtros: elige candidatos
+
+    @property
+    def exact(self) -> str:
+        """Vectores exactos en una tabla normal: reordenan los candidatos."""
+        return f"vecx_{self.id}"
 
 
 def _to_space(row: sqlite3.Row) -> EmbeddingSpace:
@@ -533,26 +546,70 @@ def ensure_embedding_space(
     if not 1 <= dim <= MAX_DIM:
         raise ValueError(f"Dimensión de embedding fuera de rango: {dim}")
     space_id = _scalar(conn, "SELECT coalesce(max(id), 0) + 1 FROM embedding_spaces")
-    table = f"vec_{space_id}"
+    table = f"vecb_{space_id}"
     conn.execute(
         "INSERT INTO embedding_spaces (id, model, dim, table_name, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
         (space_id, model, dim, table, created_ms),
     )
+    _create_vector_tables(conn, space_id, dim)
+    return EmbeddingSpace(id=space_id, model=model, dim=dim, table=table)
+
+
+def _bits(dim: int) -> int:
+    """sqlite-vec cuantiza en bloques de 8 dimensiones: se rellena con ceros."""
+    return -(-dim // 8) * 8
+
+
+def _create_vector_tables(conn: sqlite3.Connection, space_id: int, dim: int) -> None:
     # workspace_id como partition key y fechas/tipo como metadatos: así los filtros se
     # aplican dentro del KNN y no hace falta sobremuestrear (comprobado en el hito 0).
     conn.execute(
         f"""
-        CREATE VIRTUAL TABLE {table} USING vec0(
+        CREATE VIRTUAL TABLE vecb_{space_id} USING vec0(
             workspace_id TEXT PARTITION KEY,
             kind         TEXT,
             valid_from   INTEGER,
             valid_to     INTEGER,
-            embedding    FLOAT[{dim}] distance_metric=cosine
+            embedding    BIT[{_bits(dim)}]
         )
         """
     )
-    return EmbeddingSpace(id=space_id, model=model, dim=dim, table=table)
+    # Leer 100 vectores por rowid de sqlite-vec cuesta 15 ms; de una tabla normal, 0,1 ms.
+    conn.execute(
+        f"CREATE TABLE vecx_{space_id} ("
+        "seq INTEGER PRIMARY KEY REFERENCES memories(seq), embedding BLOB NOT NULL)"
+    )
+
+
+def _two_stage_vectors(conn: sqlite3.Connection) -> None:
+    """v4: cada espacio pasa de una tabla de vectores exactos en sqlite-vec a dos: binarios
+    para elegir candidatos y exactos para reordenarlos. Se conservan todos los vectores."""
+    for row in conn.execute("SELECT id, dim, table_name FROM embedding_spaces").fetchall():
+        old = str(row["table_name"])
+        if not re.fullmatch(r"vec_\d+", old):  # se interpola en SQL
+            raise RuntimeError(f"Nombre de tabla vectorial inesperado: {old!r}")
+        space_id, dim = int(row["id"]), int(row["dim"])
+        _create_vector_tables(conn, space_id, dim)
+        padding = sqlite_vec.serialize_float32([0.0] * (_bits(dim) - dim))
+        rows = conn.execute(
+            f"SELECT rowid, workspace_id, kind, valid_from, valid_to, embedding FROM {old}"
+        ).fetchall()
+        for seq, workspace_id, kind, valid_from, valid_to, embedding in rows:
+            conn.execute(
+                f"INSERT INTO vecx_{space_id} (seq, embedding) VALUES (?, ?)", (seq, embedding)
+            )
+            conn.execute(
+                f"INSERT INTO vecb_{space_id} "
+                "(rowid, workspace_id, kind, valid_from, valid_to, embedding) "
+                "VALUES (?, ?, ?, ?, ?, vec_quantize_binary(?))",
+                (seq, workspace_id, kind, valid_from, valid_to, bytes(embedding) + padding),
+            )
+        conn.execute(f"DROP TABLE {old}")
+        conn.execute(
+            "UPDATE embedding_spaces SET table_name = ? WHERE id = ?",
+            (f"vecb_{space_id}", space_id),
+        )
 
 
 def insert_vector(
@@ -564,18 +621,21 @@ def insert_vector(
 ) -> None:
     if len(vector) != space.dim:
         raise ValueError(f"El vector tiene {len(vector)} dimensiones y el espacio, {space.dim}")
+    exact = sqlite_vec.serialize_float32(list(vector))
+    padded = sqlite_vec.serialize_float32([*vector, *([0.0] * (_bits(space.dim) - space.dim))])
     conn.execute(
         f"INSERT INTO {space.table} (rowid, workspace_id, kind, valid_from, valid_to, embedding) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, vec_quantize_binary(?))",
         (
             seq,
             memory.workspace_id,
             memory.kind.value,
             to_ms(memory.valid_from),
             _valid_to_ms(memory),
-            sqlite_vec.serialize_float32(list(vector)),
+            padded,
         ),
     )
+    conn.execute(f"INSERT INTO {space.exact} (seq, embedding) VALUES (?, ?)", (seq, exact))
     conn.execute("UPDATE memories SET embedding_model = ? WHERE seq = ?", (space.model, seq))
 
 
@@ -589,22 +649,36 @@ def vector_search(
     at_ms: int | None,
     kind: Kind | None = None,
 ) -> list[tuple[Memory, float]]:
-    """KNN con los filtros dentro de la búsqueda. Devuelve (memoria, distancia coseno)."""
-    where = ["embedding MATCH ?", "k = ?", "workspace_id = ?"]
-    params: list[Any] = [sqlite_vec.serialize_float32(list(vector)), limit, workspace_id]
+    """KNN en dos pasos (ADR-0010). Devuelve (memoria, distancia coseno exacta).
+
+    1. KNN sobre los vectores binarios, con los filtros dentro, para elegir candidatos.
+    2. Reordenación de los candidatos con los vectores exactos.
+
+    Si los filtros dejan menos de `RERANK_MIN` memorias, entran todas y el resultado es exacto.
+    """
+    query = list(vector)
+    exact = sqlite_vec.serialize_float32(query)
+    padded = sqlite_vec.serialize_float32([*query, *([0.0] * (_bits(space.dim) - space.dim))])
+    where = ["embedding MATCH vec_quantize_binary(?)", "k = ?", "workspace_id = ?"]
+    params: list[Any] = [padded, max(RERANK_MIN, 5 * limit), workspace_id]
     if at_ms is not None:
         where.append("valid_from <= ? AND valid_to > ?")
         params += [at_ms, at_ms]
     if kind is not None:
         where.append("kind = ?")
         params.append(kind.value)
-    params.append(workspace_id)
+    params += [exact, limit, workspace_id]
     sql = f"""
-        WITH knn AS (SELECT rowid, distance FROM {space.table} WHERE {" AND ".join(where)})
-        SELECT {_M_COLUMNS}, knn.distance AS distance
-        FROM knn JOIN memories AS m ON m.seq = knn.rowid
+        WITH candidates AS (SELECT rowid FROM {space.table} WHERE {" AND ".join(where)}),
+        ranked AS (
+            SELECT x.seq AS seq, vec_distance_cosine(x.embedding, ?) AS distance
+            FROM candidates JOIN {space.exact} AS x ON x.seq = candidates.rowid
+            ORDER BY distance LIMIT ?
+        )
+        SELECT {_M_COLUMNS}, ranked.distance AS distance
+        FROM ranked JOIN memories AS m ON m.seq = ranked.seq
         WHERE m.workspace_id = ?
-        ORDER BY knn.distance
+        ORDER BY ranked.distance
     """
     rows = conn.execute(sql, params).fetchall()
     return [(_to_memory(row), float(row["distance"])) for row in rows]
@@ -615,7 +689,7 @@ def memories_without_vector(
 ) -> list[tuple[int, Memory]]:
     sql = f"SELECT seq, {_COLUMNS} FROM memories WHERE workspace_id = ?"
     if space is not None:
-        sql += f" AND seq NOT IN (SELECT rowid FROM {space.table})"
+        sql += f" AND seq NOT IN (SELECT seq FROM {space.exact})"
     rows = conn.execute(sql + " ORDER BY seq LIMIT ?", (workspace_id, limit)).fetchall()
     return [(int(row["seq"]), _to_memory(row)) for row in rows]
 
@@ -625,7 +699,7 @@ def count_without_vector(
 ) -> int:
     sql = "SELECT count(*) FROM memories WHERE workspace_id = ?"
     if space is not None:
-        sql += f" AND seq NOT IN (SELECT rowid FROM {space.table})"
+        sql += f" AND seq NOT IN (SELECT seq FROM {space.exact})"
     return int(conn.execute(sql, (workspace_id,)).fetchone()[0])
 
 
@@ -642,7 +716,7 @@ def has_memories_without_vector(conn: sqlite3.Connection, workspace_id: str, mod
 
 
 def has_vector(conn: sqlite3.Connection, space: EmbeddingSpace, seq: int) -> bool:
-    row = conn.execute(f"SELECT 1 FROM {space.table} WHERE rowid = ?", (seq,)).fetchone()
+    row = conn.execute(f"SELECT 1 FROM {space.exact} WHERE seq = ?", (seq,)).fetchone()
     return row is not None
 
 
@@ -700,6 +774,14 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
         )
         if orphan_vectors:
             problems.append(f"{orphan_vectors} vectores de {space.model} sin memoria")
+        unpaired = _scalar(
+            conn,
+            f"SELECT (SELECT count(*) FROM {space.table} WHERE rowid NOT IN "
+            f"(SELECT seq FROM {space.exact})) + (SELECT count(*) FROM {space.exact} "
+            f"WHERE seq NOT IN (SELECT rowid FROM {space.table}))",
+        )
+        if unpaired:
+            problems.append(f"{unpaired} vectores de {space.model} sin su pareja exacta o binaria")
         stale = _scalar(
             conn,
             f"""
@@ -716,7 +798,7 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
     for space in latest.values():
         (claimed,) = conn.execute(
             f"SELECT count(*) FROM memories WHERE embedding_model = ? "
-            f"AND seq NOT IN (SELECT rowid FROM {space.table})",
+            f"AND seq NOT IN (SELECT seq FROM {space.exact})",
             (space.model,),
         ).fetchone()
         if claimed:

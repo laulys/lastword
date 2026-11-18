@@ -235,8 +235,10 @@ class TestForgetAndIntegrity:
         memory = remember(semantic, "Ana vive en Madrid")
         (space,) = store.embedding_spaces(conn)
         seq = conn.execute("SELECT seq FROM memories WHERE id = ?", (memory.id,)).fetchone()[0]
+        conn.execute("PRAGMA foreign_keys = OFF")  # simular una base dañada
         conn.execute("DELETE FROM memories_fts WHERE rowid = ?", (seq,))
         conn.execute("DELETE FROM memories WHERE seq = ?", (seq,))
+        conn.execute("PRAGMA foreign_keys = ON")
         assert any("sin memoria" in problem for problem in semantic.doctor())
         assert store.has_vector(conn, space, seq)
 
@@ -295,11 +297,19 @@ class TestReviewFixes:
     ) -> None:
         memory = remember(semantic, "Ana vive en Madrid")
         (space,) = store.embedding_spaces(conn)
-        conn.execute(
-            f"DELETE FROM {space.table} WHERE rowid = (SELECT seq FROM memories WHERE id = ?)",
-            (memory.id,),
-        )
+        seq = conn.execute("SELECT seq FROM memories WHERE id = ?", (memory.id,)).fetchone()[0]
+        conn.execute(f"DELETE FROM {space.table} WHERE rowid = ?", (seq,))
+        conn.execute(f"DELETE FROM {space.exact} WHERE seq = ?", (seq,))
         assert any("dicen tener vector" in problem for problem in semantic.doctor())
+
+    def test_doctor_detects_a_vector_without_its_pair(
+        self, semantic: MemoryService, conn: sqlite3.Connection
+    ) -> None:
+        memory = remember(semantic, "Ana vive en Madrid")
+        (space,) = store.embedding_spaces(conn)
+        seq = conn.execute("SELECT seq FROM memories WHERE id = ?", (memory.id,)).fetchone()[0]
+        conn.execute(f"DELETE FROM {space.table} WHERE rowid = ?", (seq,))  # falta el binario
+        assert any("sin su pareja" in problem for problem in semantic.doctor())
 
 
 def test_linking_updates_the_vector_index(semantic: MemoryService, clock: FakeClock) -> None:
