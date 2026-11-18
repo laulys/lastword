@@ -494,14 +494,16 @@ def forget(
             typer.confirm(
                 tr("¿Borrar para siempre {id} y todas sus versiones?", id=memory.id), abort=True
             )
-        deleted = service.forget(memory.id)
+        result = service.forget(memory.id)
+        deleted = result.deleted_ids
         _emit(
             ctx,
-            {"deleted_ids": deleted},
+            result,
             lambda: out.print(
                 tr("[green]Borradas[/] {n}: {ids}", n=len(deleted), ids=", ".join(deleted))
             ),
         )
+        _warn(ctx, result.warnings)
 
 
 @app.command("list", help=tr("Lista memorias, las más recientes primero."))

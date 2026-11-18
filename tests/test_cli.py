@@ -45,7 +45,8 @@ def test_full_lifecycle(db_path: Path) -> None:
     found = ok(run(db_path, "search", "proyecto usa"))
     assert [hit["memory"]["id"] for hit in found["results"]] == [new_id]
 
-    assert ok(run(db_path, "forget", new_id, "--yes")) == {"deleted_ids": [old_id, new_id]}
+    forgotten = ok(run(db_path, "forget", new_id, "--yes"))
+    assert forgotten == {"deleted_ids": [old_id, new_id], "warnings": []}
 
     missing = run(db_path, "show", old_id)
     assert missing.exit_code == 1

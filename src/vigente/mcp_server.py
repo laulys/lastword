@@ -155,6 +155,7 @@ class SupersedeOutput(BaseModel):
 
 class ForgetOutput(BaseModel):
     deleted_ids: list[str]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class HistoryOutput(BaseModel):
@@ -342,9 +343,12 @@ def create_server(
 
         Úsalo solo si el usuario pide olvidar algo. Para datos que cambiaron, usa supersede.
         """
-        return run(
-            lambda memory_service: ForgetOutput(deleted_ids=memory_service.forget(memory_id))
-        )
+
+        def operation(memory_service: MemoryService) -> ForgetOutput:
+            result = memory_service.forget(memory_id)
+            return ForgetOutput(deleted_ids=result.deleted_ids, warnings=result.warnings)
+
+        return run(operation)
 
     @server.tool(annotations=READ_ONLY)
     def history(

@@ -191,7 +191,7 @@ class TestForget:
         clock.advance(days=1)
         v2 = supersede(service, v1.id, "Ana vive en Lisboa")
         other = remember(service, "El proyecto usa SQLite")
-        assert service.forget(v2.id) == [v1.id, v2.id]
+        assert service.forget(v2.id).deleted_ids == [v1.id, v2.id]
         for memory_id in (v1.id, v2.id):
             with pytest.raises(NotFoundError):
                 service.get(memory_id)
@@ -409,3 +409,28 @@ class TestDates:
         assert dated.valid_from.isoformat() == "2024-03-01T00:00:00+00:00"
         late = remember(service, "Luis vive en Valencia", valid_from="9998-12-31T23:59:59.998Z")
         assert supersede(service, late.id, "Luis vive en Lisboa").valid_from > late.valid_from
+
+
+def test_forget_says_so_when_another_connection_keeps_the_text_on_disk(
+    db_path: Path, clock: FakeClock
+) -> None:
+    """Con otra conexión leyendo, SQLite no puede vaciar el registro de cambios (WAL): el
+    borrado es efectivo, pero el texto sigue en ese archivo hasta que la conexión acabe."""
+    service = MemoryService.open(db_path, "test", clock=clock)
+    memory = remember(service, "Marta tiene una cita confidencial")
+    reader = sqlite3.connect(db_path, autocommit=True)
+    reader.execute("BEGIN")
+    reader.execute("SELECT count(*) FROM memories").fetchone()
+    try:
+        result = service.forget(memory.id)
+    finally:
+        reader.execute("ROLLBACK")
+        reader.close()
+    assert result.deleted_ids == [memory.id]
+    assert len(result.warnings) == 1 and "-wal" in result.warnings[0]
+    with pytest.raises(NotFoundError):
+        service.get(memory.id)
+    again = remember(service, "Otro dato")
+    assert service.forget(again.id).warnings == []  # sin lectores, el registro se vacía
+    service.close()
+    assert b"cita confidencial" not in disk_bytes(db_path)

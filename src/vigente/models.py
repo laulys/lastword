@@ -230,6 +230,11 @@ class SupersedeResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ForgetResult(BaseModel):
+    deleted_ids: list[str]
+    warnings: list[str] = Field(default_factory=list)
+
+
 class RecallResult(BaseModel):
     mode: Literal["vector", "hybrid", "fts_only"]  # el que se usó de verdad
     results: list[Hit]

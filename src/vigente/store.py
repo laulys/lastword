@@ -254,9 +254,18 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(f"PRAGMA user_version = {LATEST_SCHEMA_VERSION}")
 
 
-def checkpoint(conn: sqlite3.Connection) -> None:
-    """Vuelca el WAL al archivo principal y lo vacía (mejor esfuerzo si hay lectores)."""
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+CHECKPOINT_TIMEOUT_MS = 250  # cuánto espera un borrado a que los lectores suelten el WAL
+
+
+def checkpoint(conn: sqlite3.Connection) -> bool:
+    """Vuelca el WAL al archivo principal y lo vacía. Devuelve False si no pudo, porque otra
+    conexión está leyendo: lo borrado sigue entonces en el WAL hasta que esa conexión acabe."""
+    conn.execute(f"PRAGMA busy_timeout = {CHECKPOINT_TIMEOUT_MS}")
+    try:
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    finally:
+        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+    return not busy
 
 
 # --- escritura

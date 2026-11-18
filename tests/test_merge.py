@@ -82,7 +82,7 @@ def test_forget_removes_every_connected_version(
     ana, luis = two_cities
     merged = supersede(service, ana.id, "Ana y Luis viven en Lisboa", also_old_ids=[luis.id])
     other = remember(service, "Marta vive en Valencia")
-    assert sorted(service.forget(luis.id)) == sorted([ana.id, luis.id, merged.id])
+    assert sorted(service.forget(luis.id).deleted_ids) == sorted([ana.id, luis.id, merged.id])
     assert recall_ids(service, "vive", include_history=True) == [other.id]
     assert service.doctor() == []
 

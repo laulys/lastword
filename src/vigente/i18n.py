@@ -156,6 +156,7 @@ EN: dict[str, str] = {
     "La versión nueva tiene que ser un fact.": "The new version has to be a fact.",
     "{new} ya es la versión nueva de {old}.": "{new} is already the new version of {old}.",
     "Ese enlace crearía un ciclo en la cadena de versiones.": "That link would create a cycle in the version chain.",
+    "Borrado: ya no se puede leer ni buscar. Otra conexión está usando la base, así que el texto sigue en el archivo de registro (-wal) hasta que se cierre.": "Deleted: it can no longer be read or searched. Another connection is using the database, so the text stays in the log file (-wal) until it closes.",
     "No hay vectores de {model} ({dim} dimensiones). Ejecuta `vigente reindex`. Se usó solo la búsqueda de texto.": "There are no {model} vectors ({dim} dimensions). Run `vigente reindex`. Only text search was used.",
     "{error} Se usó solo la búsqueda de texto.": "{error} Only text search was used.",
     "Este Python no permite cargar extensiones de SQLite y Vigente necesita sqlite-vec. Usa un Python gestionado por uv.": "This Python cannot load SQLite extensions, and Vigente needs sqlite-vec. Use a Python managed by uv.",

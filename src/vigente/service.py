@@ -31,6 +31,7 @@ from vigente.i18n import tr
 from vigente.ids import new_ulid
 from vigente.models import (
     MAX_LIST_LIMIT,
+    ForgetResult,
     Hit,
     Kind,
     ListQuery,
@@ -243,14 +244,21 @@ class MemoryService:
             warnings=warnings or [],
         )
 
-    def forget(self, memory_id: str) -> list[str]:
+    def forget(self, memory_id: str) -> ForgetResult:
         """Borra para siempre el hecho y todas sus versiones, también las de los hechos que una
-        versión unió (ADR-0008). Devuelve los ids borrados."""
+        versión unió (ADR-0008). Avisa si otra conexión impide vaciar el registro de cambios."""
         with store.transaction(self._conn):
             ids = [memory.id for memory in self._lineage(self._require(memory_id))]
             store.delete_memories(self._conn, self.workspace_id, ids)
-        store.checkpoint(self._conn)
-        return ids
+        warnings = []
+        if not store.checkpoint(self._conn):
+            warnings.append(
+                tr(
+                    "Borrado: ya no se puede leer ni buscar. Otra conexión está usando la base, "
+                    "así que el texto sigue en el archivo de registro (-wal) hasta que se cierre."
+                )
+            )
+        return ForgetResult(deleted_ids=ids, warnings=warnings)
 
     def reindex(self) -> ReindexResult:
         """Calcula los vectores que falten con el modelo configurado."""
