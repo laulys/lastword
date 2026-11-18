@@ -53,3 +53,15 @@ class ConfigError(VigenteError):
 
 class EmbeddingError(VigenteError):
     code = "embedding_unavailable"
+
+
+class SecretDetectedError(VigenteError):
+    """El texto parece contener una clave o contraseña (ADR-0007)."""
+
+    code = "secret_detected"
+
+
+class HiddenCharactersError(VigenteError):
+    """El texto contiene caracteres invisibles que pueden esconder instrucciones (ADR-0007)."""
+
+    code = "hidden_characters"

@@ -16,8 +16,11 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    computed_field,
     model_validator,
 )
+
+from vigente import safety
 
 MAX_CONTENT_CHARS = 4000
 MAX_TAGS = 20
@@ -148,6 +151,15 @@ class Memory(BaseModel):
     superseded_by_id: str | None = None
     supersede_reason: str | None = None  # por qué esta versión reemplazó a la anterior
     embedding_model: str | None = None  # modelo del último vector calculado; None = sin vector
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def flags(self) -> list[str]:
+        """Posibles órdenes al agente, caracteres ocultos o secretos (ADR-0007).
+
+        Se calculan al leer: cubren también memorias guardadas antes de existir los detectores.
+        """
+        return safety.flags([self.content, self.source, self.supersede_reason, *self.tags])
 
 
 class Hit(BaseModel):

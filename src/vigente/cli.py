@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from vigente import safety
 from vigente.config import (
     DEFAULT_DB_PATH,
     DEFAULT_EMBED_MODEL,
@@ -25,7 +26,7 @@ from vigente.config import (
     parse_search_mode,
 )
 from vigente.embeddings import DEFAULT_BASE_URL
-from vigente.errors import VigenteError
+from vigente.errors import SecretDetectedError, VigenteError
 from vigente.models import (
     Hit,
     Kind,
@@ -158,7 +159,10 @@ def _service(ctx: typer.Context) -> Iterator[MemoryService]:
         )
         yield service
     except VigenteError as exc:
-        _fail(options, exc.code, exc.message, current_id=exc.current_id)
+        message = exc.message
+        if isinstance(exc, SecretDetectedError):
+            message += " Si de verdad quieres guardarlo, repite el comando con --allow-secret."
+        _fail(options, exc.code, message, current_id=exc.current_id)
     except ValidationError as exc:
         _fail(options, "invalid_input", describe_validation_error(exc), exit_code=2)
     finally:
@@ -214,6 +218,12 @@ def _state(memory: Memory) -> str:
     return "vigente"
 
 
+def _content(memory: Memory) -> str:
+    """El contenido, con un ⚠ si está marcado (ADR-0007): `vigente review` explica por qué."""
+    text = escape(memory.content)
+    return f"[yellow]⚠[/] {text}" if memory.flags else text
+
+
 def _table(title: str | None = None) -> Table:
     # Sin bordes verticales: cabe en 80 columnas con ids completos.
     return Table(title=title, box=box.SIMPLE_HEAD, title_justify="left")
@@ -226,7 +236,7 @@ def _memory_table(memories: list[Memory], title: str | None = None) -> Table:
     table.add_column("vigencia (UTC)", max_width=12)
     table.add_column("estado", no_wrap=True, min_width=11)
     for memory in memories:
-        table.add_row(memory.id, escape(memory.content), _validity(memory), _state(memory))
+        table.add_row(memory.id, _content(memory), _validity(memory), _state(memory))
     return table
 
 
@@ -242,7 +252,7 @@ def _hits_table(hits: list[Hit], title: str | None = None) -> Table:
     table.add_column("vigencia (UTC)", max_width=12)
     table.add_column("vía", no_wrap=True)
     for position, hit in enumerate(hits, start=1):
-        content = escape(hit.memory.content)
+        content = _content(hit.memory)
         if hit.memory.status is Status.SUPERSEDED:
             content = f"[dim]{content}[/]"
         source = _SOURCES.get(tuple(hit.matched_by), "+".join(hit.matched_by))
@@ -305,6 +315,13 @@ def add(
     valid_from: Annotated[
         str | None, typer.Option(help="Desde cuándo es verdad (ISO 8601). Por defecto, ahora.")
     ] = None,
+    allow_secret: Annotated[
+        bool,
+        typer.Option(
+            "--allow-secret",
+            help="Guardar aunque parezca una clave o contraseña. El servidor MCP no lo permite.",
+        ),
+    ] = False,
 ) -> None:
     """Guarda una memoria y sugiere hechos vigentes que podría reemplazar."""
     with _service(ctx) as service:
@@ -317,7 +334,7 @@ def add(
                 "source": "cli",
             }
         )
-        result = service.remember(request)
+        result = service.remember(request, allow_secrets=allow_secret)
         _emit(ctx, result, lambda: _render_remember(result))
         _warn(ctx, result.warnings)
 
@@ -337,6 +354,13 @@ def supersede(
         str | None, typer.Option(help="Desde cuándo es verdad lo nuevo (ISO 8601).")
     ] = None,
     reason: Annotated[str | None, typer.Option(help="Por qué cambió.")] = None,
+    allow_secret: Annotated[
+        bool,
+        typer.Option(
+            "--allow-secret",
+            help="Guardar aunque parezca una clave o contraseña. El servidor MCP no lo permite.",
+        ),
+    ] = False,
 ) -> None:
     """Reemplaza un hecho por su versión nueva, conservando el historial.
 
@@ -350,7 +374,7 @@ def supersede(
         else:
             fields |= {"new_content": new_content, "valid_from": valid_from, "source": "cli"}
         request = SupersedeRequest.model_validate(fields)
-        result = service.supersede(request)
+        result = service.supersede(request, allow_secrets=allow_secret)
         _emit(ctx, result, lambda: _render_supersede(result))
         _warn(ctx, result.warnings)
 
@@ -465,6 +489,39 @@ def list_memories(
                 out.print(f"Siguiente página: --cursor {page.next_cursor}")
 
         _emit(ctx, page, render)
+
+
+@app.command()
+def review(ctx: typer.Context) -> None:
+    """Lista las memorias marcadas: posibles órdenes al agente, caracteres ocultos o secretos."""
+    with _service(ctx) as service:
+        flagged = service.review()
+
+        def render() -> None:
+            if not flagged:
+                out.print(
+                    "[green]Nada marcado.[/] Ninguna memoria parece contener órdenes al agente, "
+                    "caracteres ocultos ni secretos."
+                )
+                return
+            table = _table(f"memorias marcadas: {len(flagged)}")
+            table.add_column("id", style="dim", no_wrap=True)
+            table.add_column("contenido", overflow="fold", min_width=20)
+            table.add_column("motivo", overflow="fold", min_width=16)
+            for memory in flagged:
+                reasons = "; ".join(safety.describe(flag) for flag in memory.flags)
+                table.add_row(memory.id, escape(memory.content), escape(reasons))
+            out.print(table)
+            out.print("Si alguna no debería estar en la memoria, bórrala con vigente forget <id>.")
+
+        data = [
+            {
+                "memory": memory.model_dump(mode="json"),
+                "reasons": [safety.describe(flag) for flag in memory.flags],
+            }
+            for memory in flagged
+        ]
+        _emit(ctx, data, render)
 
 
 @app.command()
