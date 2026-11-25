@@ -1,6 +1,6 @@
 # ADR-0011: Quién puede cambiar lo que es verdad
 
-- Estado: **propuesto, sin implementar**
+- Estado: aceptado
 - Fecha: 25-11-2026
 - Amplía: [ADR-0007](0007-seguridad-de-la-memoria.md) y [ADR-0008](0008-un-hecho-reemplaza-a-varios.md)
 
@@ -12,7 +12,7 @@ Los filtros del ADR-0007 buscan secretos, caracteres ocultos y órdenes. Un dato
 
 ## Evidencia
 
-[`eval/false_replacement.py`](../../eval/false_replacement.py), con 12 hechos guardados por una persona y 12 versiones falsas guardadas por un agente ([resultados](../../eval/results/false_replacement.md)):
+**Antes de la protección (v1.3.1)**, con 12 hechos guardados por una persona y 12 versiones falsas guardadas por un agente:
 
 - por `supersede`, se aceptan 12 de 12, sin ningún aviso, y `recall` devuelve solo el falso;
 - por `remember`, se aceptan 12 de 12, sin ningún aviso, y `recall` devuelve los dos. Además, en los 12 `remember` propone al agente cerrar el hecho verdadero;
@@ -30,7 +30,7 @@ Leído en su código el 25-11-2026, sin ejecutarlo. «No se encontró» no signi
 
 La idea no es nueva. Lo que no se encontró junto en ninguno de los tres es aplicarla a frases corrientes, con fechas, y que el dato más fiable siga vigente mientras el otro espera. No se han revisado Mem0, Letta ni Zep para esto.
 
-## Propuesta
+## Decisión
 
 - **Cada memoria guarda su origen:** `person`, `agent` o `external` (contenido de fuera: un correo, una página).
 - **El origen lo fija la interfaz, no quien escribe.** La CLI es `person`. Por MCP se es como mucho `agent`: el agente puede declarar que algo es `external`, y nunca subir de nivel.
@@ -59,6 +59,29 @@ La idea no es nueva. Lo que no se encontró junto en ninguno de los tres es apli
 - ⚠️ **Por HTTP, todos comparten un token** (ADR-0009). Para distinguir clientes haría falta un token por cliente.
 - ⚠️ **Quien puede ejecutar la CLI es `person`**, también un agente con acceso a la terminal.
 
-## Cómo se medirá (E5)
+## Resultado (E5)
 
-El protocolo completo, fijado antes de implementar, está en [eval/README.md](../../eval/README.md).
+Protocolo fijado antes de implementar, en [eval/README.md](../../eval/README.md); [resultados completos](../../eval/results/e5_trust.md).
+
+- **(a) Se cumple.** Ningún hecho de una persona queda cerrado ni borrado por `supersede`, `new_id`, reenlace o `forget`, con 12 pares inventados y 70 de LongMemEval, con y sin embeddings.
+- **(b) Depende de cómo se lea.** El falso sale con el verdadero y con algún aviso en 63 de 69 pares de LongMemEval (91%), y en los 12 inventados. Si el aviso tiene que nombrar a los dos, que es lo que importa, son 58 de 69 (84%): no llega al 90%. La redacción de la regla no lo precisaba, y se vio al medir. El umbral no se ha ajustado con estos datos, y **esta vía no se da por protegida**.
+- **(c) Se cumple.** Entre orígenes iguales, 326 de 326 cambios funcionan como antes.
+- **(d) Se cumple.** El MRR de E1 y el de E2 no cambian.
+
+**Se adopta** por (a), (c) y (d). El aviso de `remember` se queda como mitigación: nunca empeora lo que había, y con embeddings y k = 5 el falso no sale solo en ningún caso. Pero no es una garantía.
+
+**Coste medido.** Con 50.000 hechos de agentes, guardar y buscar tardan lo mismo que en la v1.3.1 (7,2 y 6,9 ms, medido a mano en la misma máquina, frente a 7,0 y 6,9). Una persona tarda más en guardar, 61 ms, porque se compara con todo lo de los agentes. Y un agente tarda 91 ms si hay 25.000 hechos de personas, que se miran todos para que no se pueda inundar.
+
+## Vías que aparecieron al implementarlo
+
+Esquivaban una versión más sencilla, y cada una tiene su test:
+
+- contar la mentira como episodio;
+- colarla reemplazando un hecho cualquiera de otro agente;
+- guardar muchas copias para que el hecho verdadero no salga entre los parecidos;
+- cambiar la mentira por otra, o esperar a que la persona actualice el hecho, para perder el aviso;
+- guardarla antes que la verdad.
+
+## Migración
+
+La v7 añade el origen: lo guardado desde la CLI pasa a ser de una persona y lo demás, de un agente. Es fiable porque el servidor MCP siempre escribió `source = 'mcp'`.

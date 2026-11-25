@@ -4,8 +4,16 @@ What changed in each version of Vigente. Each one has its [release notes](https:
 
 ## Unreleased
 
-- Security research: a false fact can replace a true one without any warning, reproduced in 12 of 12 cases after reading about [ShadowMerge](https://arxiv.org/abs/2605.09033). It is **not fixed yet**; [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) proposes how.
+**Added**
+
+- Who may change a fact ([ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md)). Each memory keeps its origin (a person, an agent or outside), and a less trusted origin cannot close or delete a more trusted fact: the change waits for a person. New commands: `pending`, `accept`, `reject` and `confirm`. New MCP field: `from_outside`.
+- E5 measures it, with the rule fixed beforehand, after reproducing the attack: in 1.3.1, 12 of 12 false facts replaced true ones without a warning.
 - The README says when the security filters matter most.
+
+**Changed**
+
+- Database schema v6 → v7. What was saved from the CLI becomes a person's. Databases migrate on first open; older versions cannot open them afterwards.
+- Over MCP, `supersede` on a person's fact returns `new: null` and a warning, and `forget` is refused.
 
 ## 1.3.1 · 2026-11-18
 

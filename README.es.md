@@ -49,14 +49,23 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 
 **La pregunta.** Los filtros paran secretos y órdenes. Pero una mentira escrita como una frase normal no es ninguna de las dos cosas. [ShadowMerge](https://arxiv.org/abs/2605.09033) (mayo de 2026) ataca así a las memorias en grafo: en vez de una orden, introduce una relación corriente que contradice a la verdadera. Sus autores miden un 93,8% de éxito medio sobre Mem0 y concluyen que las defensas de entrada representativas no bastan. Vigente no es un grafo y no se ha ejecutado ShadowMerge contra él, pero la idea se traslada.
 
-**Qué pasó aquí.** Una persona guarda «el proveedor cobra en la cuenta acabada en 4471». Un agente que leyó un correo falso lo reemplaza por «…acabada en 9902». Con 12 casos así ([script](eval/false_replacement.py), [resultados](eval/results/false_replacement.md)):
+**Qué pasó aquí.** Una persona guarda «el proveedor cobra en la cuenta acabada en 4471». Un agente que leyó un correo falso lo reemplaza por «…acabada en 9902». En la versión 1.3.1, con 12 casos así, se aceptaron las 12 mentiras, ninguna con aviso, y `recall` devolvía solo la mentira. `remember` incluso proponía al agente cerrar el hecho verdadero. La verdad se recuperaba siempre con `history`, pero nadie avisaba de que había que mirarlo.
 
-| | Mentiras aceptadas | Con algún aviso | `recall` da solo la mentira | La verdad se recupera |
-|---|---:|---:|---:|---:|
-| El agente usa `supersede` | 12 de 12 | 0 de 12 | **12 de 12** | 12 de 12 |
-| El agente usa `remember` | 12 de 12 | 0 de 12 | 0 de 12 (da las dos) | 12 de 12 |
+**La solución.** Cada memoria guarda su origen: una persona, un agente o algo que un agente trajo de fuera. Lo fija la interfaz, no quien escribe: por MCP nadie es nunca una persona. Un origen menos fiable no puede cerrar ni borrar un hecho más fiable. El cambio espera, el hecho verdadero sigue vigente y decide una persona (`vigente pending`, `accept`, `reject`). Medido con la regla fijada [antes de escribir el código](eval/README.md), con 12 pares inventados y 70 de un benchmark público ([script](eval/e5_trust.py), [resultados](eval/results/e5_trust.md)):
 
-Nada se sobrescribe, así que `history` y `as_of` siguen dando el hecho verdadero. Pero nadie avisa de que hay que mirarlo, y en los 12 casos `remember` incluso propone al agente cerrar el hecho verdadero. **Está abierto en la versión actual.**
+| Ataque a un hecho que guardó una persona | Hechos cerrados o borrados | La mentira sale sin la verdad (k=5) |
+|---|---:|---:|
+| `supersede`, con texto o con una memoria guardada | **0 de 82** | 0 |
+| Enlazar dos hechos de la propia persona | **0 de 82** | 0 |
+| `forget` y después guardar la mentira | **0 de 82** | 0 |
+| `remember` de la mentira junto a la verdad | no aplica | 0 |
+
+**Lo que no resuelve:**
+
+- **Un agente puede seguir cambiando lo que guardó otro agente.** Mismo origen, sin protección. `vigente confirm` protege un hecho que una persona da por bueno.
+- **Las mentiras guardadas junto a la verdad solo se mitigan.** Salen las dos, la fiable primero. La tabla es con embeddings: pidiendo un solo resultado, 3 de 23 mentiras salieron solas, y sin embeddings, 1 de 66 con cinco resultados. El aviso nombra a las dos en 58 de 69 casos reales (84%): por debajo del 90% fijado antes, si tiene que nombrar a las dos. Leída al pie de la letra, la regla se cumple con 63 de 69.
+- **Cuesta avisos de más.** Las 10 frases legítimas del mismo tema que un hecho de una persona llevaron uno. Sin embeddings, también 2 de 8 sin relación.
+- **Un agente con acceso a la terminal puede usar la CLI,** y ahí cuenta como una persona.
 
 **Cómo lo tratan otros**, leído en su código el 25 de noviembre de 2026, sin ejecutarlo:
 
@@ -66,10 +75,11 @@ Nada se sobrescribe, así que `history` y `as_of` siguen dando el hecho verdader
 | [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard/blob/2628cfdb91731ab80caf7fcb0adbe293645ce6e3/src/agent_memory_guard/policies/access.py#L58) | No se encontraron | En parte: reglas de quién escribe qué; cuarentena y vuelta atrás |
 | [ShieldCortex](https://github.com/Drakon-Systems-Ltd/ShieldCortex/blob/128a0734883f33309c9ebfe171c9511fcfb9f6b8/src/threat-graph/conflict.ts#L36) | En parte, en su grafo | En parte: la confianza señala conflictos en cuatro tipos de relación y decide una persona |
 
-**Qué viene ahora.** El [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) propone que cada memoria guarde su origen y que un origen menos fiable no pueda cerrar un hecho más fiable: el verdadero sigue vigente mientras el cambio espera a una persona. Dice también lo que *no* protegería, y fija cómo se medirá antes de escribir código. **Propuesto, sin implementar.**
+El diseño, lo que se descartó y por qué, en el [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md).
 
 ## Novedades desde la 1.0
 
+- **Quién puede cambiar un hecho (sin publicar).** Un origen menos fiable no puede reemplazar un hecho más fiable: el cambio espera a una persona ([por qué](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
 - **Seguridad (1.1).** Rechaza los secretos y los caracteres Unicode invisibles al guardar, y marca el texto que suena a orden para el agente. `vigente review` lista lo marcado.
 - **Un hecho reemplaza a varios (1.2).** «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos de una vez: `also_old_ids` en MCP, `--also` en la CLI. Desde la 1.3 se puede sumar otro hecho después al mismo reemplazo.
 - **Compartirla entre ordenadores (1.2).** `vigente-mcp --http` sirve la memoria a otros ordenadores, a un equipo o a un agente en la nube, con un token obligatorio. Desde la 1.3, `--allowed-host` la deja en localhost detrás de un proxy HTTPS.
@@ -86,7 +96,7 @@ Cada versión, en detalle: [CHANGELOG.md](CHANGELOG.md) (en inglés).
 - **El motor no llama a ningún LLM.** `remember` usa embeddings locales (embeddinggemma con Ollama) para proponer hechos que lo nuevo podría reemplazar. Decide el agente, que ya es un LLM. Las propuestas priorizan no perder ningún reemplazo (17 de 18 en el conjunto escrito a mano), así que las frases del mismo tema también reciben una: la similitud no distingue «esto actualiza aquello» de «esto añade un detalle», y [tapar nombres y cifras no ayudó](docs/decisions/0004-modelo-de-embeddings.md).
 - **Olvidar es borrar de verdad.** `forget` borra todas las versiones de un hecho de las filas, de los dos índices y del disco. Un test comprueba que los bytes desaparecen del archivo.
 - **Si algo falla, sigue funcionando.** Sin embeddings, busca por texto. Se niega a enviar memorias a un servicio que no sea local salvo que lo permitas.
-- **Está hecha para compartirse entre agentes.** Rechaza los secretos al guardar y marca las memorias que suenan a orden ([Seguridad y privacidad](#seguridad-y-privacidad)). Un dato falso no es ninguna de las dos cosas: [eso sigue abierto](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho).
+- **Está hecha para compartirse entre agentes.** Rechaza los secretos al guardar y marca las memorias que suenan a orden ([Seguridad y privacidad](#seguridad-y-privacidad)). Un dato falso no es ninguna de las dos cosas, así que un origen menos fiable no puede reemplazar un hecho más fiable ([qué cubre y qué no](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
 
 ## Probarlo
 
@@ -112,6 +122,8 @@ Todos los comandos de la CLI (`vigente --help` muestra sus opciones):
 | `list` | Lista memorias, las más recientes primero, con filtros |
 | `forget` | Borra para siempre un hecho y todas sus versiones |
 | `review` | Lista las memorias marcadas: posibles órdenes al agente, caracteres ocultos o secretos |
+| `confirm` | Da por bueno un hecho que guardó un agente: solo una persona lo cambia |
+| `pending`, `accept`, `reject` | Cambios que esperan a que decida una persona |
 | `reindex` | Calcula los vectores que falten |
 | `doctor`, `stats` | Comprueba la base de datos y sus índices; cuenta memorias |
 | `init` | Crea la base de datos y el workspace |
@@ -235,7 +247,7 @@ Cada decisión tiene un ADR con las alternativas que se consideraron:
 8. [Un hecho nuevo puede reemplazar a varios](docs/decisions/0008-un-hecho-reemplaza-a-varios.md)
 9. [Compartir entre ordenadores: HTTP con token](docs/decisions/0009-compartir-por-http.md)
 10. [Búsqueda en dos pasos: vectores binarios y reordenación exacta](docs/decisions/0010-busqueda-en-dos-pasos.md)
-11. [Quién puede cambiar lo que es verdad](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) (propuesto, sin implementar)
+11. [Quién puede cambiar lo que es verdad](docs/decisions/0011-quien-puede-cambiar-un-hecho.md)
 
 El diseño completo está en [docs/architecture.md](docs/architecture.md).
 
