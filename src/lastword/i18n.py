@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import os
 
-LANG_ENV = "LASTWORD_LANG"
+from lastword import environment
+
 LANGUAGES = ("es", "en")
 
 
 def language() -> str:
     """`es` o `en`. Se lee en cada llamada: cambiar el entorno surte efecto al momento."""
-    explicit = os.environ.get(LANG_ENV, "").strip().lower()
+    explicit = (environment.value("LANG") or "").strip().lower()
     if explicit in LANGUAGES:
         return explicit
     for variable in ("LC_ALL", "LC_MESSAGES", "LANG"):

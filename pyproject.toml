@@ -21,12 +21,15 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/laulys/vigente"
-Documentation = "https://github.com/laulys/vigente#readme"
+Repository = "https://github.com/laulys/lastword"
+Documentation = "https://github.com/laulys/lastword#readme"
 
 [project.scripts]
 lastword = "lastword.cli:app"
 lastword-mcp = "lastword.mcp_server:main"
+# Los nombres anteriores: siguen valiendo para los clientes MCP ya configurados.
+vigente = "lastword.cli:app"
+vigente-mcp = "lastword.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]

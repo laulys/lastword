@@ -20,15 +20,15 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from lastword import safety, store
+from lastword import environment, safety, store
 from lastword.config import (
-    DEFAULT_DB_PATH,
     DEFAULT_EMBED_MODEL,
     DEFAULT_WORKSPACE,
     EmbeddingSettings,
     parse_search_mode,
 )
 from lastword.embeddings import DEFAULT_BASE_URL
+from lastword.environment import DEFAULT_DB_PATH
 from lastword.errors import LastwordError, SecretDetectedError
 from lastword.i18n import tr
 from lastword.models import (
@@ -84,12 +84,18 @@ class Options:
 def main(
     ctx: typer.Context,
     db: Annotated[
-        Path, typer.Option("--db", envvar="LASTWORD_DB", help=tr("Archivo SQLite de la memoria."))
+        Path,
+        typer.Option(
+            "--db", envvar=environment.names("DB"), help=tr("Archivo SQLite de la memoria.")
+        ),
     ] = DEFAULT_DB_PATH,
     workspace: Annotated[
         str,
         typer.Option(
-            "--workspace", "-w", envvar="LASTWORD_WORKSPACE", help=tr("Espacio de memoria aislado.")
+            "--workspace",
+            "-w",
+            envvar=environment.names("WORKSPACE"),
+            help=tr("Espacio de memoria aislado."),
         ),
     ] = DEFAULT_WORKSPACE,
     as_json: Annotated[bool, typer.Option("--json", help=tr("Salida en JSON."))] = False,
@@ -97,7 +103,7 @@ def main(
         str,
         typer.Option(
             "--embed-model",
-            envvar="LASTWORD_EMBED_MODEL",
+            envvar=environment.names("EMBED_MODEL"),
             help=tr(
                 "Modelo de embeddings (Ollama u otro servicio compatible con OpenAI). "
                 "'none' desactiva la búsqueda semántica."
@@ -108,7 +114,7 @@ def main(
         str,
         typer.Option(
             "--embed-url",
-            envvar="LASTWORD_EMBED_BASE_URL",
+            envvar=environment.names("EMBED_BASE_URL"),
             help=tr(
                 "URL del servicio de embeddings. Si no es local, exige LASTWORD_ALLOW_REMOTE=1."
             ),
@@ -118,7 +124,7 @@ def main(
         str,
         typer.Option(
             "--search-mode",
-            envvar="LASTWORD_SEARCH_MODE",
+            envvar=environment.names("SEARCH_MODE"),
             help=tr("vector (por defecto), hybrid (vector + texto) o text."),
         ),
     ] = SearchMode.VECTOR.value,
@@ -126,7 +132,7 @@ def main(
     # La clave de API y el permiso de envío remoto solo se leen del entorno, nunca de
     # argumentos: no deben quedar en el historial de la shell.
     ctx.obj = Options(
-        db=db.expanduser(),
+        db=environment.default_db_path() if db == DEFAULT_DB_PATH else db.expanduser(),
         workspace=workspace,
         as_json=as_json,
         embedding=EmbeddingSettings.from_env(model=embed_model, base_url=embed_url),

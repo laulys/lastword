@@ -7,12 +7,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from lastword import environment
 from lastword.embeddings import DEFAULT_BASE_URL, OpenAICompatibleEmbedder
+from lastword.environment import DEFAULT_DB_PATH
 from lastword.i18n import tr
 from lastword.models import SearchMode
 
 DEFAULT_EMBED_MODEL = "embeddinggemma"  # ver ADR-0004
-DEFAULT_DB_PATH = Path("~/.lastword/lastword.db")
 DEFAULT_WORKSPACE = "default"
 _DISABLED = {"", "none", "off", "false", "0"}
 _ENABLED = {"1", "true", "yes", "on"}
@@ -34,14 +35,14 @@ class EmbeddingSettings:
         base_url: str | None = None,
     ) -> EmbeddingSettings:
         """Lee LASTWORD_EMBED_*; `model` y `base_url`, si se pasan, tienen prioridad."""
-        raw_model = (
-            model if model is not None else env.get("LASTWORD_EMBED_MODEL", DEFAULT_EMBED_MODEL)
-        )
+        raw_model = environment.value("EMBED_MODEL", env) if model is None else model
+        if raw_model is None:
+            raw_model = DEFAULT_EMBED_MODEL
         return cls(
             model=None if raw_model.strip().lower() in _DISABLED else raw_model.strip(),
-            base_url=base_url or env.get("LASTWORD_EMBED_BASE_URL") or DEFAULT_BASE_URL,
-            api_key=env.get("LASTWORD_EMBED_API_KEY") or None,
-            allow_remote=env.get("LASTWORD_ALLOW_REMOTE", "").strip().lower() in _ENABLED,
+            base_url=base_url or environment.value("EMBED_BASE_URL", env) or DEFAULT_BASE_URL,
+            api_key=environment.value("EMBED_API_KEY", env) or None,
+            allow_remote=(environment.value("ALLOW_REMOTE", env) or "").strip().lower() in _ENABLED,
         )
 
     def build(self) -> OpenAICompatibleEmbedder | None:
@@ -67,10 +68,12 @@ class Settings:
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> Settings:
         return cls(
-            db_path=Path(env.get("LASTWORD_DB") or DEFAULT_DB_PATH).expanduser(),
-            workspace=env.get("LASTWORD_WORKSPACE") or DEFAULT_WORKSPACE,
+            db_path=Path(
+                environment.value("DB", env) or environment.default_db_path()
+            ).expanduser(),
+            workspace=environment.value("WORKSPACE", env) or DEFAULT_WORKSPACE,
             embedding=EmbeddingSettings.from_env(env),
-            search_mode=parse_search_mode(env.get("LASTWORD_SEARCH_MODE", "")),
+            search_mode=parse_search_mode(environment.value("SEARCH_MODE", env) or ""),
         )
 
 

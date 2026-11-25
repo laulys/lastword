@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import hmac
-import os
 import sqlite3
 import sys
 from collections.abc import Awaitable, Callable, Iterator, MutableMapping, Sequence
@@ -28,7 +27,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, ValidationError
 
-from lastword import __version__, store
+from lastword import __version__, environment, store
 from lastword.config import Settings
 from lastword.embeddings import Embedder
 from lastword.errors import LastwordError, PendingConfirmationError
@@ -555,7 +554,7 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     args = parser.parse_args(argv)
-    token = os.environ.get(TOKEN_ENV, "")
+    token = environment.value("TOKEN") or ""
     if args.http and len(token) < MIN_TOKEN_CHARS:
         sys.exit(
             tr(
