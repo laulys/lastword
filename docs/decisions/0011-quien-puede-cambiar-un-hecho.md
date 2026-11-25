@@ -35,7 +35,11 @@ La idea no es nueva. Lo que no se encontró junto en ninguno de los tres es apli
 - **Cada memoria guarda su origen:** `person`, `agent` o `external` (contenido de fuera: un correo, una página).
 - **El origen lo fija la interfaz, no quien escribe.** La CLI es `person`. Por MCP se es como mucho `agent`: el agente puede declarar que algo es `external`, y nunca subir de nivel.
 - **Un origen menos fiable no cierra un hecho más fiable.** `supersede` guarda la versión nueva como **pendiente**: el hecho anterior sigue vigente, y `recall` lo devuelve con el aviso de que hay un cambio por confirmar.
-- **Por `remember` también se comprueba.** Si el texto se parece a un hecho de una persona, `recall` avisa de la posible contradicción.
+- **Por `remember` también se comprueba.** Si el texto se parece a un hecho más fiable, se guarda, pero `recall` devuelve siempre los dos, el más fiable primero y con un aviso.
+- **Enlazar vale lo que valga el menos fiable de los dos:** quien enlaza o la memoria enlazada. Así un agente no puede cerrar un hecho de una persona con otro hecho de esa persona que no tiene que ver.
+- **Olvidar también se protege.** Un agente no puede borrar un hecho que una persona guardó o confirmó: si no, bastaría borrar el verdadero y guardar el falso. Se hace en la CLI.
+- **Lo que una persona acepta o enlaza pasa a ser de una persona,** para que el hecho no pierda la protección al cambiar.
+- **El texto pendiente no sale en ninguna búsqueda ni aviso:** es lo que escribió quien ataca.
 - **Decide una persona, en la CLI:** aceptar o rechazar. El servidor MCP no tiene esa herramienta.
 - **Una persona puede confirmar un hecho** que guardó un agente, y entonces queda protegido.
 - **Entre orígenes iguales no cambia nada.**
@@ -57,9 +61,4 @@ La idea no es nueva. Lo que no se encontró junto en ninguno de los tres es apli
 
 ## Cómo se medirá (E5)
 
-Regla fijada antes de implementar, y publicada en un commit anterior:
-
-- **Datos:** los 12 casos de la reproducción y otros 30 escritos por alguien que no haya escrito las reglas, o tomados de un conjunto público. Y 30 cambios legítimos.
-- **Se mide, por cada par de orígenes y por las dos vías:** cuántos datos falsos llegan a ser la única respuesta de `recall`, cuántos llegan sin aviso y cuántos cambios legítimos quedan bloqueados.
-- **Se adopta si:** (a) ningún dato de un origen menos fiable llega a ser la única respuesta frente a uno de una persona; (b) los cambios entre orígenes iguales funcionan como hoy en todos los casos; y (c) el MRR de E1 y el de E2 no bajan más de 0,005.
-- **Se publica también lo que no protege:** el agente que cambia lo de otro agente.
+El protocolo completo, fijado antes de implementar, está en [eval/README.md](../../eval/README.md).
