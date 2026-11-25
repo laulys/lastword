@@ -96,7 +96,7 @@ La búsqueda por vectores era exacta y su coste crecía de forma lineal ([escala
 Fijado antes de implementar el [ADR-0011](../docs/decisions/0011-quien-puede-cambiar-un-hecho.md).
 
 - **Datos:**
-  - los 12 pares de [`false_replacement.py`](false_replacement.py), escritos antes de ver el resultado;
+  - los 12 pares inventados de [`e5_trust.py`](e5_trust.py), escritos antes de ver el resultado;
   - los 72 pares de *knowledge-update* de LongMemEval, un conjunto público: el mensaje más antiguo con evidencia hace de hecho verdadero y el más reciente, de cambio. No son mentiras, pero se parecen como se parecen un dato y su cambio en una conversación real;
   - las 10 frases del mismo tema y las 8 sin relación de [`embedding_choice.json`](data/embedding_choice.json), escritas mucho antes, para contar avisos de más.
 - **Vías, con el hecho verdadero guardado por una persona y el ataque de un agente o de un origen externo:** `supersede` con texto, `remember` y después `supersede` con `new_id`, `remember` solo, reenlazar dos hechos de la persona, y `forget` seguido de `remember`. Los pares de cada conjunto comparten un mismo workspace, así que compiten entre sí.
@@ -126,5 +126,5 @@ uv run python eval/scale.py                  # latencia y escala
 uv run python eval/e3_security.py            # seguridad; con LongMemEval descargado, también texto real
 uv run python eval/e4_exact.py               # códigos exactos
 uv run python eval/masked_similarity.py      # propuestas con los valores tapados (ADR-0004)
-uv run python eval/false_replacement.py      # un dato falso reemplaza a uno verdadero (ADR-0011)
+uv run python eval/e5_trust.py               # quién puede cambiar un hecho; con LongMemEval descargado
 ```
