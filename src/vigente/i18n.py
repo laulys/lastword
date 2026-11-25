@@ -186,6 +186,7 @@ EN: dict[str, str] = {
     "Este Python no permite cargar extensiones de SQLite y Vigente necesita sqlite-vec. Usa un Python gestionado por uv.": "This Python cannot load SQLite extensions, and Vigente needs sqlite-vec. Use a Python managed by uv.",
     "La base usa el esquema v{found}, más nuevo que el que conoce esta versión de Vigente (v{known}).": "The database uses schema v{found}, newer than the one this version of Vigente knows (v{known}).",
     "{n} referencias rotas entre memorias": "{n} broken references between memories",
+    "otros usuarios del equipo pueden leer {file}; ejecuta chmod 600 sobre él": "other users of this computer can read {file}; run chmod 600 on it",
     "{n} entradas del índice de texto sin memoria": "{n} text index entries without a memory",
     "{n} memorias sin entrada en el índice de texto": "{n} memories without a text index entry",
     "cadena de reemplazos inconsistente en {id}": "inconsistent supersession chain at {id}",

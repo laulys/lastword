@@ -213,11 +213,31 @@ def connect(path: str | Path) -> sqlite3.Connection:
         if not in_memory:
             _enable_wal(conn)
             conn.execute("PRAGMA synchronous = NORMAL")
+        before = schema_version(conn)
         migrate(conn)
+        if isinstance(target, Path) and before < 7:
+            # Antes de la v1.3 el archivo nacía con los permisos por defecto del sistema.
+            _make_private(target)
     except BaseException:
         conn.close()
         raise
     return conn
+
+
+def _files(target: Path) -> list[Path]:
+    paths = [target, Path(f"{target}-wal"), Path(f"{target}-shm")]
+    return [path for path in paths if path.exists()]
+
+
+def _is_shared(path: Path) -> bool:
+    """¿Lo pueden leer otros usuarios del equipo? En Windows los permisos no van por aquí."""
+    return os.name == "posix" and bool(path.stat().st_mode & 0o077)
+
+
+def _make_private(target: Path) -> None:
+    for path in _files(target):
+        if _is_shared(path) and path.stat().st_uid == os.getuid():
+            path.chmod(0o600)
 
 
 def _enable_wal(conn: sqlite3.Connection) -> None:
@@ -1019,6 +1039,15 @@ def integrity_problems(conn: sqlite3.Connection) -> list[str]:
     quick = conn.execute("PRAGMA quick_check").fetchone()[0]
     if quick != "ok":
         problems.append(f"SQLite quick_check: {quick}")
+    path = next((row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"), "")
+    for file in _files(Path(path)) if path else []:
+        if _is_shared(file):
+            problems.append(
+                tr(
+                    "otros usuarios del equipo pueden leer {file}; ejecuta chmod 600 sobre él",
+                    file=file.name,
+                )
+            )
     broken_refs = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken_refs:
         problems.append(tr("{n} referencias rotas entre memorias", n=len(broken_refs)))

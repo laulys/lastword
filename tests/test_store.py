@@ -197,3 +197,24 @@ def test_a_new_database_is_private_to_its_owner(tmp_path: Path) -> None:
     modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in [path.parent, *path.parent.iterdir()]}
     assert modes["nueva"] == 0o700
     assert {mode for name, mode in modes.items() if name != "nueva"} == {0o600}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="permisos POSIX")
+def test_upgrading_makes_an_old_database_private(tmp_path: Path) -> None:
+    """Antes de la v1.3 el archivo nacía legible para otros usuarios del ordenador."""
+    path = tmp_path / "vieja.db"
+    raw = sqlite3.connect(path, autocommit=True)
+    for step in store._MIGRATIONS[:1]:
+        assert isinstance(step, str)
+        raw.executescript(step)
+    raw.execute("PRAGMA user_version = 1")
+    raw.close()
+    path.chmod(0o644)
+    conn = store.connect(path)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert store.integrity_problems(conn) == []
+    path.chmod(0o640)  # después, quien lo cambia lo decide: solo se avisa
+    store.connect(path).close()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert any("chmod 600" in problem for problem in store.integrity_problems(conn))
+    conn.close()
