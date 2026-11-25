@@ -175,6 +175,7 @@ class ForgetOutput(BaseModel):
 
 class HistoryOutput(BaseModel):
     versions: list[MemoryView] = Field(description="De la más antigua a la vigente")
+    omitted: int = Field(default=0, description="Versiones más antiguas que no se muestran")
 
 
 class ListOutput(BaseModel):
@@ -391,12 +392,16 @@ def create_server(
     def history(
         memory_id: Annotated[str, Field(description="Id de cualquier versión del hecho.")],
     ) -> HistoryOutput:
-        """Todas las versiones de un hecho, de la más antigua a la vigente."""
-        return run(
-            lambda memory_service: HistoryOutput(
-                versions=[MemoryView.of(m) for m in memory_service.history(memory_id)]
+        """Las versiones de un hecho, de la más antigua a la vigente: las últimas 100."""
+
+        def operation(memory_service: MemoryService) -> HistoryOutput:
+            versions = memory_service.history(memory_id)
+            shown = versions[-MAX_LIST_LIMIT:]
+            return HistoryOutput(
+                versions=[MemoryView.of(m) for m in shown], omitted=len(versions) - len(shown)
             )
-        )
+
+        return run(operation)
 
     @server.tool(annotations=READ_ONLY)
     def list_memories(
