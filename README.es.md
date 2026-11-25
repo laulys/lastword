@@ -163,6 +163,16 @@ bearer_token_env_var = "VIGENTE_TOKEN"
 
 Una memoria que comparten varios agentes, y que dura entre sesiones, tiene que cuidar lo que entra y lo que sale ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
 
+**Cuándo importa.** Claude Code y Codex ya protegen la sesión: piden permiso antes de ejecutar comandos, y sus modelos están entrenados para desconfiar de las órdenes que aparecen en páginas o archivos. Lo que no revisan es lo que queda escrito en una memoria que dura más que la sesión y que leerán otros clientes. Por eso estos filtros importan sobre todo cuando la memoria se comparte:
+
+- entre Claude Code, Codex y Cursor, porque la memoria es tan segura como el cliente más descuidado que escribe en ella;
+- entre personas, por HTTP, porque lo que guarda otro acaba en tus sesiones;
+- con agentes que leen contenido de fuera, como correos, issues o páginas web, o con agentes hechos a medida que tienen menos protecciones propias.
+
+Con un solo cliente, en tu propio ordenador, aportan menos: entonces la razón principal para usar Vigente es la otra mitad, saber qué sigue siendo verdad.
+
+Qué hace Vigente:
+
 - **Por defecto, nada sale de tu ordenador.** La memoria es un archivo SQLite local, y los embeddings los calcula un modelo local. Enviar memorias a un servicio de embeddings no local exige `VIGENTE_ALLOW_REMOTE=1`, y con direcciones locales se ignoran los proxies del sistema.
 - **El archivo es privado.** Se crea legible solo para su dueño (carpeta `0700`, archivo `0600`). No está cifrado: lo protege el cifrado del disco, como FileVault o BitLocker.
 - **Los secretos no se guardan.** Se rechazan al guardar las claves de API de 10 formatos conocidos, las contraseñas escritas en una frase o como variable de entorno, y los tokens con aspecto aleatorio. El error no repite el secreto y propone guardar dónde está. Solo una persona puede saltárselo, desde la CLI con `--allow-secret`; los clientes MCP no pueden.

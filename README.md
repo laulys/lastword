@@ -163,6 +163,16 @@ bearer_token_env_var = "VIGENTE_TOKEN"
 
 A memory that several agents share, and that lasts between sessions, has to be careful with what goes in and what goes out ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
 
+**When it matters.** Claude Code and Codex already protect the session: they ask before running commands, and their models are trained to distrust instructions found in pages or files. What they do not check is what stays written in a memory that outlives the session and that other clients will read. So these filters matter most when the memory is shared:
+
+- between Claude Code, Codex and Cursor, where the memory is only as careful as the least careful client that writes to it;
+- between people, over HTTP, where what someone else saves ends up in your sessions;
+- with agents that read outside content, such as emails, issues or web pages, or agents built from scratch with fewer safeguards of their own.
+
+With a single client, on your own computer, they add less: the main reason to use Vigente is then the other half, knowing what is still true.
+
+What Vigente does:
+
 - **Nothing leaves your computer by default.** The memory is a local SQLite file, and embeddings come from a local model. Sending memories to a non-local embedding service requires `VIGENTE_ALLOW_REMOTE=1`, and system proxies are ignored for local addresses.
 - **The file is private.** It is created readable by its owner only (folder `0700`, file `0600`). It is not encrypted: disk encryption, such as FileVault or BitLocker, covers it.
 - **Secrets are not stored.** API keys in 10 known formats, passwords written in a sentence or as an environment variable, and random-looking tokens are rejected on save. The error never repeats the secret, and suggests saving where it lives instead. Only a person can override it, from the CLI with `--allow-secret`; MCP clients cannot.
