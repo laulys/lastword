@@ -42,6 +42,17 @@ def fts_match_expression(text: str) -> str | None:
     return " OR ".join(f'"{token}"' for token in chosen)
 
 
+def words(text: str) -> frozenset[str]:
+    """Las palabras de un texto, sin repetir ni contar las vacías."""
+    return frozenset(_TOKEN.findall(text.lower())) - STOPWORDS
+
+
+def share_most(one: frozenset[str], other: frozenset[str]) -> bool:
+    """¿Comparten la mitad o más de las palabras del texto más corto?"""
+    shortest = min(len(one), len(other))
+    return shortest > 0 and 2 * len(one & other) >= shortest
+
+
 def search_fts(
     conn: sqlite3.Connection,
     workspace_id: str,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -17,6 +18,7 @@ from rich import box
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
 from vigente import safety, store
 from vigente.config import (
@@ -37,6 +39,7 @@ from vigente.models import (
     NewMemory,
     Origin,
     PendingChange,
+    PendingPreview,
     RecallQuery,
     RecallResult,
     RememberResult,
@@ -53,9 +56,11 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
-out = Console()
-err = Console(stderr=True)
+# Sin emojis por nombre: «:cross_mark:» se vería como otra cosa que lo guardado.
+out = Console(emoji=False)
+err = Console(stderr=True, emoji=False)
 
+_C1 = re.compile("[\x7f-\x9f]")
 _KIND = {Kind.FACT: "hecho", Kind.EPISODE: "episodio"}
 _SOURCES = {
     ("fts",): "texto",
@@ -155,10 +160,24 @@ def _fail(
         payload = {"code": code, "message": message}
         if current_id is not None:
             payload["current_id"] = current_id
-        typer.echo(json.dumps(payload, ensure_ascii=False), err=True)
+        typer.echo(_json(payload), err=True)
     else:
-        err.print(f"[bold red]Error[/] [dim]({code})[/] {escape(message)}")
+        err.print(
+            Text.assemble(("Error", "bold red"), " ", (f"({code})", "dim"), " ", _shown(message))
+        )
     raise typer.Exit(exit_code)
+
+
+def _json(payload: object, *, indent: int | None = None) -> str:
+    """JSON legible. `json` no escapa los controles C1, y algunos terminales los obedecen."""
+    text = json.dumps(payload, ensure_ascii=False, indent=indent)
+    return _C1.sub(lambda match: f"\\u{ord(match.group()):04x}", text)
+
+
+def _shown(text: str, *, flagged: bool = False) -> Text:
+    """Un texto guardado, listo para el terminal. Como `Text`, y no como marcas de Rich: nada de
+    lo que escribió quien lo guardó puede dar formato, ni convertirse en un emoji."""
+    return Text.assemble(("⚠ ", "yellow") if flagged else "", safety.visible(text))
 
 
 @contextmanager
@@ -197,7 +216,7 @@ def _warn(ctx: typer.Context, warnings: list[str]) -> None:
     """En modo humano, los avisos van a stderr; en JSON ya viajan dentro de la respuesta."""
     if not _options(ctx).as_json:
         for warning in warnings:
-            err.print(f"[yellow]{tr('Aviso:')}[/] {escape(warning)}")
+            err.print(Text.assemble((tr("Aviso:"), "yellow"), " ", _shown(warning)))
 
 
 def _emit(
@@ -205,7 +224,7 @@ def _emit(
 ) -> None:
     if _options(ctx).as_json:
         payload = data.model_dump(mode="json") if isinstance(data, BaseModel) else data
-        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        typer.echo(_json(payload, indent=2))
     else:
         render()
 
@@ -239,10 +258,9 @@ def _state(memory: Memory) -> str:
     return tr("vigente")
 
 
-def _content(memory: Memory) -> str:
+def _content(memory: Memory) -> Text:
     """El contenido, con un ⚠ si está marcado (ADR-0007): `vigente review` explica por qué."""
-    text = escape(memory.content)
-    return f"[yellow]⚠[/] {text}" if memory.flags else text
+    return _shown(memory.content, flagged=bool(memory.flags))
 
 
 def _table(title: str | None = None) -> Table:
@@ -250,12 +268,22 @@ def _table(title: str | None = None) -> Table:
     return Table(title=title, box=box.SIMPLE_HEAD, title_justify="left")
 
 
+def _wide() -> bool:
+    """¿Caben las columnas sin recortar? Si no, todas pueden partir su texto en varias líneas:
+    Rich recortaría por la derecha, sin avisar, lo que no cabe."""
+    return out.width >= 72
+
+
+def _at_least(columns: int) -> int | None:
+    return columns if _wide() else None
+
+
 def _memory_table(memories: list[Memory], title: str | None = None) -> Table:
     table = _table(title)
-    table.add_column("id", style="dim", no_wrap=True)
-    table.add_column(tr("contenido"), overflow="fold", min_width=20)
-    table.add_column(tr("vigencia (UTC)"), max_width=12)
-    table.add_column(tr("estado"), no_wrap=True, min_width=11)
+    table.add_column("id", style="dim", no_wrap=_wide(), overflow="fold")
+    table.add_column(tr("contenido"), overflow="fold", min_width=_at_least(20))
+    table.add_column(tr("vigencia (UTC)"), max_width=12, overflow="fold")
+    table.add_column(tr("estado"), no_wrap=_wide(), overflow="fold", min_width=_at_least(11))
     for memory in memories:
         table.add_row(memory.id, _content(memory), _validity(memory), _state(memory))
     return table
@@ -268,14 +296,14 @@ def _hits_table(hits: list[Hit], title: str | None = None) -> Table:
     """
     table = _table(title)
     table.add_column("#", justify="right")
-    table.add_column("id", style="dim", no_wrap=True)
-    table.add_column(tr("contenido"), overflow="fold", min_width=20)
-    table.add_column(tr("vigencia (UTC)"), max_width=12)
-    table.add_column(tr("vía"), no_wrap=True)
+    table.add_column("id", style="dim", no_wrap=_wide(), overflow="fold")
+    table.add_column(tr("contenido"), overflow="fold", min_width=_at_least(20))
+    table.add_column(tr("vigencia (UTC)"), max_width=12, overflow="fold")
+    table.add_column(tr("vía"), no_wrap=_wide(), overflow="fold")
     for position, hit in enumerate(hits, start=1):
         content = _content(hit.memory)
         if hit.memory.status is Status.SUPERSEDED:
-            content = f"[dim]{content}[/]"
+            content.stylize("dim")
         source = tr(_SOURCES.get(tuple(hit.matched_by), "+".join(hit.matched_by)))
         table.add_row(str(position), hit.memory.id, content, _validity(hit.memory), source)
     return table
@@ -502,6 +530,8 @@ def forget(
             if _options(ctx).as_json:  # la pregunta se mezclaría con el JSON de la salida
                 message = tr("Con --json no se puede preguntar: confirma el borrado con --yes.")
                 _fail(_options(ctx), "invalid_input", message, exit_code=2)
+            # Con todas sus versiones delante: pueden venir de otro origen que la pedida.
+            out.print(_memory_table(service.history(memory.id)))
             typer.confirm(
                 tr("¿Borrar para siempre {id} y todas sus versiones?", id=memory.id), abort=True
             )
@@ -559,12 +589,12 @@ def review(ctx: typer.Context) -> None:
                 )
                 return
             table = _table(tr("memorias marcadas: {n}", n=len(flagged)))
-            table.add_column("id", style="dim", no_wrap=True)
-            table.add_column(tr("contenido"), overflow="fold", min_width=20)
-            table.add_column(tr("motivo"), overflow="fold", min_width=16)
+            table.add_column("id", style="dim", no_wrap=_wide(), overflow="fold")
+            table.add_column(tr("contenido"), overflow="fold", min_width=_at_least(20))
+            table.add_column(tr("motivo"), overflow="fold", min_width=_at_least(16))
             for memory in flagged:
                 reasons = "; ".join(safety.describe(flag) for flag in memory.flags)
-                table.add_row(memory.id, escape(memory.content), escape(reasons))
+                table.add_row(memory.id, _shown(memory.content), _shown(reasons))
             out.print(table)
             out.print(
                 tr("Si alguna no debería estar en la memoria, bórrala con vigente forget <id>.")
@@ -587,30 +617,51 @@ def confirm(
 ) -> None:
     with _service(ctx) as service:
         memory = service.confirm(memory_id)
-        _emit(ctx, memory, lambda: out.print(tr("[green]Confirmada[/] {id}", id=memory.id)))
+
+        def render() -> None:
+            out.print(tr("[green]Confirmada[/] {id}", id=memory.id))
+            out.print(_memory_table([memory]))
+            if memory.tags:
+                out.print(Text.assemble(tr("etiquetas"), ": ", _shown(", ".join(memory.tags))))
+
+        _emit(ctx, memory, render)
 
 
 _ORIGIN = {Origin.PERSON: "persona", Origin.AGENT: "agente", Origin.EXTERNAL: "de fuera"}
 
 
-def _pending_table(service: MemoryService, changes: list[PendingChange]) -> Table:
-    table = _table(tr("cambios pendientes: {n}", n=len(changes)))
-    table.add_column("id", style="dim", no_wrap=True)
-    table.add_column(tr("sigue valiendo"), overflow="fold", min_width=20)
-    table.add_column(tr("cambio pedido"), overflow="fold", min_width=20)
+def _pending_rows(preview: PendingPreview, change: PendingChange) -> list[tuple[str, Text]]:
+    """Todo lo que se aplicaría al aceptar, cada dato con su etiqueta."""
+    rows = [(tr("pedido por"), Text(tr(_ORIGIN[change.origin])))]
+    rows += [(tr("sigue valiendo"), _content(old)) for old in preview.olds]
+    rows.append((tr("pasaría a ser"), _shown(preview.content, flagged=bool(preview.flags))))
+    rows += [(tr("ya reemplazó a"), _content(old)) for old in preview.already_replaced]
+    start = tr("ahora") if preview.start is None else _fmt(preview.start)
+    rows.append((tr("desde"), Text(start)))
+    if preview.tags:
+        rows.append((tr("etiquetas"), _shown(", ".join(preview.tags))))
+    if change.reason:
+        rows.append((tr("motivo"), _shown(change.reason)))
+    if preview.stale:
+        rows.append((tr("aviso"), Text(tr("ya no se puede aceptar: algo cambió después"))))
+    return rows
+
+
+def _render_pending(service: MemoryService, changes: list[PendingChange]) -> None:
+    """Un bloque por cambio, y no una tabla: en un terminal estrecho, una tabla recorta el texto
+    por la derecha. Las etiquetas van en su columna: quien pide el cambio escribió el texto y el
+    motivo, y no debe poder imitar los demás datos."""
+    out.print(tr("cambios pendientes: {n}", n=len(changes)))
     for change in changes:
-        if change.new_id is None:
-            text, flagged = change.content or "", bool(change.flags)
-        else:
-            memory = service.get(change.new_id)
-            text, flagged = memory.content, bool(memory.flags)
-        wanted = f"[yellow]⚠[/] {escape(text)}" if flagged else escape(text)
-        origin = tr("pedido por: {origin}", origin=tr(_ORIGIN[change.origin]))
-        detail = f"{origin}. {escape(change.reason)}" if change.reason else origin
-        wanted += f"\n[dim]{detail}[/]"
-        olds = "\n".join(escape(service.get(old_id).content) for old_id in change.old_ids)
-        table.add_row(change.id, olds, wanted)
-    return table
+        block = Table.grid(padding=(0, 1))
+        block.add_column(style="dim", overflow="fold", max_width=14)
+        block.add_column(overflow="fold")
+        for label, value in _pending_rows(service.preview(change), change):
+            block.add_row(label, value)
+        out.print()
+        out.print(Text(change.id, style="bold"), overflow="fold")
+        out.print(block)
+    out.print()
 
 
 @app.command(help=tr("Lista los cambios que esperan a que una persona los acepte o rechace."))
@@ -622,7 +673,7 @@ def pending(ctx: typer.Context) -> None:
             if not changes:
                 out.print(tr("[green]Ningún cambio pendiente.[/]"))
                 return
-            out.print(_pending_table(service, changes))
+            _render_pending(service, changes)
             out.print(tr("Decide con vigente accept <id> o vigente reject <id>."))
 
         _emit(ctx, [change.model_dump(mode="json") for change in changes], render)
@@ -645,12 +696,21 @@ def reject(
     pending_id: Annotated[str, typer.Argument(help=tr("Id del cambio pendiente."))],
 ) -> None:
     with _service(ctx) as service:
-        service.reject(pending_id)
-        _emit(
-            ctx,
-            {"rejected_id": pending_id.strip().upper()},
-            lambda: out.print(tr("[green]Rechazado.[/] El hecho anterior sigue vigente.")),
-        )
+        result = service.reject(pending_id)
+
+        def render() -> None:
+            out.print(tr("[green]Rechazado.[/] El hecho anterior sigue vigente."))
+            if result.kept_id is not None:
+                out.print(
+                    tr(
+                        "La memoria que se pedía usar sigue guardada: bórrala con "
+                        "vigente forget {id} si no es cierta.",
+                        id=result.kept_id,
+                    )
+                )
+
+        _emit(ctx, result, render)
+        _warn(ctx, result.warnings)
 
 
 @app.command(help=tr("Comprueba la consistencia de la base de datos y de sus índices."))

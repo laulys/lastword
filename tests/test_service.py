@@ -427,7 +427,7 @@ def test_forget_says_so_when_another_connection_keeps_the_text_on_disk(
         reader.execute("ROLLBACK")
         reader.close()
     assert result.deleted_ids == [memory.id]
-    assert len(result.warnings) == 1 and "-wal" in result.warnings[0]
+    assert len(result.warnings) == 1 and "en sus archivos" in result.warnings[0]
     with pytest.raises(NotFoundError):
         service.get(memory.id)
     again = remember(service, "Otro dato")

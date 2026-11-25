@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner, Result
 
 from vigente import store
-from vigente.cli import app
+from vigente.cli import _json, app
 
 runner = CliRunner()
 
@@ -240,3 +240,14 @@ class TestClearErrors:
         missing = run(db_path, "forget", "01J0000000000000000000000Z", as_json=False, input="y\n")
         assert missing.exit_code == 1
         assert "Borrar" not in missing.stdout
+
+
+def test_forget_shows_every_version_before_asking(db_path: Path) -> None:
+    first = ok(run(db_path, "add", "El proyecto usa SQLite"))["memory"]["id"]
+    ok(run(db_path, "supersede", first, "El proyecto usa PostgreSQL"))
+    asked = run(db_path, "forget", first, input="n\n", as_json=False)
+    assert "SQLite" in asked.stdout and "PostgreSQL" in asked.stdout
+
+
+def test_json_escapes_what_a_terminal_would_obey() -> None:
+    assert _json({"a": "x\x9by\x1bz"}) == '{"a": "x\\u009by\\u001bz"}'

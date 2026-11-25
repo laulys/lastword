@@ -396,6 +396,15 @@ def set_supersedes(
         raise RuntimeError(f"No se pudo enlazar {memory_id} como versión nueva de {supersedes_id}")
 
 
+def set_reason(
+    conn: sqlite3.Connection, workspace_id: str, memory_id: str, reason: str | None
+) -> None:
+    conn.execute(
+        "UPDATE memories SET supersede_reason = ? WHERE workspace_id = ? AND id = ?",
+        (reason, workspace_id, memory_id),
+    )
+
+
 def mark_superseded(
     conn: sqlite3.Connection,
     workspace_id: str,
@@ -547,6 +556,11 @@ def add_contradictions(conn: sqlite3.Connection, new_id: str, old_ids: Sequence[
     )
 
 
+def count_contradictions(conn: sqlite3.Connection, new_id: str) -> int:
+    row = conn.execute("SELECT count(*) FROM contradictions WHERE new_id = ?", (new_id,)).fetchone()
+    return int(row[0])
+
+
 def inherit_contradictions(conn: sqlite3.Connection, old_id: str, new_id: str) -> None:
     """Una versión nueva hereda los choques de la anterior, en los dos papeles: si no, bastaría
     cambiar la memoria dudosa por otra, o el hecho fiable por su versión nueva, para perderlos."""
@@ -558,40 +572,43 @@ def inherit_contradictions(conn: sqlite3.Connection, old_id: str, new_id: str) -
     )
 
 
-def similar_facts(
+def similar_memories(
     conn: sqlite3.Connection,
     space: EmbeddingSpace,
     workspace_id: str,
     vector: Sequence[float],
     *,
     origins: Sequence[Origin],
-    at_ms: int,
+    kind: Kind | None,
+    max_distance: float,
     limit: int,
-) -> list[tuple[Memory, float]]:
-    """Los hechos vigentes de estos orígenes más parecidos, con la distancia exacta.
+) -> list[Memory]:
+    """Las memorias de estos orígenes más parecidas, por distancia exacta. Antes las que no tienen
+    fecha de fin, para que las versiones antiguas de un hecho no dejen fuera a la vigente.
 
-    Se miran todos, sin la preselección por candidatos de `vector_search`: si no, muchas copias
+    Se miran todas, sin la preselección por candidatos de `vector_search`: si no, muchas copias
     de una mentira dejarían fuera al hecho verdadero.
     """
     marks = ", ".join("?" for _ in origins)
+    of_kind = "" if kind is None else "AND m.kind = ? "
     rows = conn.execute(
         f"SELECT {_M_COLUMNS}, vec_distance_cosine(x.embedding, ?) AS distance "
         # INDEXED BY: sin él, SQLite elige el índice de fechas y recorre el workspace entero.
         "FROM memories AS m INDEXED BY memories_ws_origin "
         f"JOIN {space.exact} AS x ON x.seq = m.seq "
-        f"WHERE m.workspace_id = ? AND m.origin IN ({marks}) AND m.kind = 'fact' "
-        "AND m.valid_from <= ? AND m.valid_to > ? AND distance IS NOT NULL "
-        "ORDER BY distance LIMIT ?",
+        f"WHERE m.workspace_id = ? AND m.origin IN ({marks}) {of_kind}"
+        "AND distance <= ? ORDER BY m.valid_to = ? DESC, distance LIMIT ?",
         (
             sqlite_vec.serialize_float32(list(vector)),
             workspace_id,
             *(origin.value for origin in origins),
-            at_ms,
-            at_ms,
+            *(() if kind is None else (kind.value,)),
+            max_distance,
+            OPEN_END_MS,
             limit,
         ),
     ).fetchall()
-    return [(_to_memory(row), float(row["distance"])) for row in rows]
+    return [_to_memory(row) for row in rows]
 
 
 def contradictions(

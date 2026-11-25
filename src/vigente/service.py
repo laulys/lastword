@@ -44,9 +44,11 @@ from vigente.models import (
     Origin,
     Page,
     PendingChange,
+    PendingPreview,
     RecallQuery,
     RecallResult,
     ReindexResult,
+    RejectResult,
     RememberResult,
     SearchMode,
     SupersedeRequest,
@@ -58,7 +60,8 @@ Clock = Callable[[], datetime]
 
 CANDIDATE_LIMIT = 3
 CLASH_LIMIT = 20  # hechos más fiables y parecidos que se apuntan como posible choque
-WEAKER_LIMIT = 200  # y menos fiables: muchas copias de una mentira previa a la verdad
+WEAKER_LIMIT = 1000  # y menos fiables: muchas copias de una mentira previa a la verdad
+MAX_SHOWN = 20  # hechos más fiables que acompañan a un resultado; del resto solo se avisa
 MAX_PENDING = 200  # cambios pendientes por workspace: nadie revisa más
 REINDEX_BATCH = 32
 _ONE_MS = timedelta(milliseconds=1)
@@ -165,15 +168,16 @@ class MemoryService:
         )
         warnings: list[str] = []
         vector = self._embed(memory.content, "document", warnings)
+        probe = self._probe(memory.content, vector, warnings)
         with store.transaction(self._conn):
             seq = store.insert_memory(self._conn, memory)
             if vector is not None:
                 self._store_vector(seq, memory, vector, now)
+            self._note_clashes(memory, probe)
         stored = self._require(memory.id)
         candidates = (
-            self._possible_supersedes(stored, vector, warnings) if stored.kind is Kind.FACT else []
+            self._possible_supersedes(stored, probe, warnings) if stored.kind is Kind.FACT else []
         )
-        self._note_clashes(stored, vector, warnings)
         return RememberResult(memory=stored, possible_supersedes=candidates, warnings=warnings)
 
     def supersede(
@@ -211,6 +215,7 @@ class MemoryService:
             self._leave_pending(request, actor)
         warnings: list[str] = []
         vector = self._embed(content, "document", warnings)
+        probe = self._probe(content, vector, warnings)
         with store.transaction(self._conn):
             olds = [self._require(old_id) for old_id in request.old_ids]
             for old in olds:
@@ -219,20 +224,18 @@ class MemoryService:
                     raise ProtectedError(
                         tr("{id} lo acaba de confirmar una persona. Vuelve a pedirlo.", id=old.id)
                     )
-            latest_start = max(old.valid_from for old in olds)
             if request.valid_from is None:
-                # Sin fecha explícita: ahora, pero siempre después de que empezaran las anteriores.
-                valid_from = max(now, latest_start + _ONE_MS)
+                valid_from = _start_after(olds, now)
             else:
                 valid_from = _truncate(request.valid_from)
-                _check_starts_after(valid_from, latest_start)
+                _check_starts_after(valid_from, max(old.valid_from for old in olds))
             primary = olds[0]
             new = Memory(
                 id=new_ulid(store.to_ms(now)),
                 workspace_id=self.workspace_id,
                 kind=Kind.FACT,
                 content=content,
-                tags=list(primary.tags if request.tags is None else request.tags),
+                tags=list(_strongest(olds).tags if request.tags is None else request.tags),
                 source=request.source,
                 confidence=request.confidence,
                 created_at=now,
@@ -244,8 +247,8 @@ class MemoryService:
             seq = store.insert_memory(self._conn, new)
             if vector is not None:
                 self._store_vector(seq, new, vector, now)
-            self._close(olds, new.id, valid_from)
-        self._note_clashes(new, vector, warnings)
+            self._close(olds, new.id, valid_from, actor)
+            self._note_clashes(new, probe)
         return self._superseded(new.id, olds, warnings)
 
     def _link(self, request: SupersedeRequest, new_id: str, actor: Origin) -> SupersedeResult:
@@ -257,8 +260,17 @@ class MemoryService:
 
         Vale lo que valga el menos fiable de los dos, quien enlaza o la memoria enlazada: un
         agente no puede cerrar un hecho de una persona con otro hecho suyo que no tiene que ver.
-        Si enlaza una persona, vale lo que ella, y la versión nueva pasa a ser suya (ADR-0011).
+        Enlazar también escribe en la versión nueva (su motivo, su historial), así que tampoco
+        puede ser más fiable que quien enlaza. Y tiene que ser la vigente: si no, se aceptaría
+        un texto y regiría el que lo reemplazó. Si enlaza una persona, vale lo que ella, y la
+        versión nueva pasa a ser suya (ADR-0011).
         """
+        by_person = actor is Origin.PERSON
+        warnings: list[str] = []
+        probe = None
+        if by_person:  # la versión nueva pasa a ser suya: se compara como un hecho de una persona
+            text = self._require(new_id).content
+            probe = self._probe(text, self._embed(text, "document", warnings), warnings)
         with store.transaction(self._conn):
             olds = [self._require(old_id) for old_id in request.old_ids]
             new = self._require(new_id)
@@ -271,10 +283,12 @@ class MemoryService:
                 raise NotSupersedableError(
                     tr("Ese enlace crearía un ciclo en la cadena de versiones.")
                 )
+            self._check_supersedable(new)
             _check_starts_after(new.valid_from, max(old.valid_from for old in olds))
-            by_person = actor is Origin.PERSON
             effective = actor if by_person else min(actor, new.origin, key=lambda o: o.rank)
-            if not _outranked(effective, olds):
+            allowed = not _outranked(effective, [*olds, new])
+            if allowed:
+                self._check_nothing_waits_for_a_person([new.id])  # cambiaría lo enseñado
                 if new.supersedes_id is None:
                     store.set_supersedes(
                         self._conn,
@@ -283,11 +297,17 @@ class MemoryService:
                         supersedes_id=olds[0].id,
                         reason=request.reason,
                     )
+                elif by_person and new.origin is not Origin.PERSON:
+                    # El motivo que ya tenía lo escribió un agente: no pasa a ser de la persona.
+                    store.set_reason(self._conn, self.workspace_id, new.id, request.reason)
                 if by_person:
                     store.set_origin(self._conn, self.workspace_id, new.id, Origin.PERSON)
-                self._close(olds, new.id, new.valid_from)
-                return self._superseded(new.id, olds)
-        self._leave_pending(request, effective)
+                self._close(olds, new.id, new.valid_from, actor)
+                if by_person and new.origin is not Origin.PERSON:
+                    self._note_clashes(self._require(new.id), probe)
+        if not allowed:
+            self._leave_pending(request, effective)
+        return self._superseded(new.id, olds, warnings)
 
     def _actor(self, external: bool) -> Origin:
         """Quién escribe. Se puede declarar un origen menos fiable que el propio, nunca más."""
@@ -298,16 +318,14 @@ class MemoryService:
     def _leave_pending(self, request: SupersedeRequest, actor: Origin) -> NoReturn:
         """Apunta el cambio para que decida una persona. Los hechos siguen vigentes."""
         with store.transaction(self._conn):
+            for old_id in request.old_ids:  # otra conexión pudo cambiarlo o borrarlo
+                self._check_supersedable(self._require(old_id))
+            if request.new_id is not None:
+                self._check_supersedable(self._require(request.new_id))
             pending = store.list_pending(self._conn, self.workspace_id)
-            wanted = (sorted(request.old_ids), request.new_content, request.new_id)
-            same = [c for c in pending if (sorted(c.old_ids), c.content, c.new_id) == wanted]
-            if not same and len(pending) >= MAX_PENDING:
-                raise ProtectedError(
-                    tr("Hay demasiados cambios pendientes. Una persona tiene que revisarlos.")
-                )
             now = self._now()
             change = PendingChange(
-                id=same[0].id if same else new_ulid(store.to_ms(now)),
+                id=new_ulid(store.to_ms(now)),
                 old_ids=request.old_ids,
                 content=request.new_content,
                 new_id=request.new_id,
@@ -319,7 +337,16 @@ class MemoryService:
                 origin=actor,
                 created_at=now,
             )
-            if not same:
+            # Lo mismo pedido dos veces es un solo cambio, pero solo si coincide en todo: si no,
+            # quien lo pide primero podría colar su fecha o su motivo en la petición de otro.
+            same = [c for c in pending if _asks_the_same(c, change)]
+            if same:
+                change = same[0]
+            else:
+                if len(pending) >= MAX_PENDING:
+                    raise ProtectedError(
+                        tr("Hay demasiados cambios pendientes. Una persona tiene que revisarlos.")
+                    )
                 store.insert_pending(self._conn, self.workspace_id, change)
             if request.new_id is not None:  # ya está guardada: que no salga sin la más fiable
                 store.add_contradictions(self._conn, request.new_id, request.old_ids)
@@ -337,15 +364,66 @@ class MemoryService:
     def confirm(self, memory_id: str) -> Memory:
         """Una persona da por bueno un hecho que guardó un agente: queda protegido."""
         self._require_person()
+        text = self._require(memory_id).content
+        probe = self._probe(text, self._embed(text, "document", []), [])
         with store.transaction(self._conn):
             memory = self._require(memory_id)
+            if memory.kind is Kind.FACT:
+                self._check_supersedable(memory)  # confirmar algo ya reemplazado no protege nada
+            if memory.origin is not Origin.PERSON:
+                # Se da por bueno el hecho. El motivo lo escribió un agente y no se enseña.
+                store.set_reason(self._conn, self.workspace_id, memory.id, None)
             store.set_origin(self._conn, self.workspace_id, memory.id, Origin.PERSON)
             confirmed = self._require(memory.id)
-        self._note_clashes(confirmed, self._embed(confirmed.content, "document", []), [])
+            self._note_clashes(confirmed, probe)
         return confirmed
 
     def pending(self) -> list[PendingChange]:
         return store.list_pending(self._conn, self.workspace_id)
+
+    def preview(self, change: PendingChange) -> PendingPreview:
+        """Lo que se aplicaría al aceptar el cambio, para que se vea antes de decidir."""
+        found = [
+            store.get_memory(self._conn, self.workspace_id, old_id) for old_id in change.old_ids
+        ]
+        olds = [memory for memory in found if memory is not None]
+        new = (
+            None
+            if change.new_id is None
+            else store.get_memory(self._conn, self.workspace_id, change.new_id)
+        )
+        involved = [*olds, new] if new is not None else olds
+        stale = (
+            len(olds) < len(change.old_ids)
+            or (change.new_id is not None and new is None)
+            or any(memory.superseded_by_id is not None for memory in involved)
+        )
+        if new is not None:
+            return PendingPreview(
+                olds=olds,
+                content=new.content,
+                already_replaced=[
+                    self._require(old_id)
+                    for old_id in store.predecessor_ids(self._conn, self.workspace_id, new.id)
+                ],
+                tags=new.tags,
+                start=new.valid_from,
+                flags=_unique([*new.flags, *change.flags]),
+                stale=stale,
+            )
+        inherited = _strongest(olds).tags if olds else []
+        now = self._now()
+        start = change.valid_from
+        if start is None and olds and _start_after(olds, now) > now:
+            start = _start_after(olds, now)  # el hecho aún no ha empezado
+        return PendingPreview(
+            olds=olds,
+            content=change.content or "",
+            tags=inherited if change.tags is None else change.tags,
+            start=start,
+            flags=change.flags,
+            stale=stale,
+        )
 
     def accept(self, pending_id: str) -> SupersedeResult:
         """Aplica un cambio pendiente como si lo hiciera la persona que lo acepta."""
@@ -358,13 +436,17 @@ class MemoryService:
             fields |= {"tags": change.tags, "source": change.source}
             fields |= {"confidence": change.confidence, "valid_from": change.valid_from}
         result = self.supersede(SupersedeRequest.model_validate(fields))
-        self._drop_pending(change.id)
-        return result
+        leftovers = self._drop_pending(change.id)
+        return result.model_copy(update={"warnings": [*result.warnings, *leftovers]})
 
-    def reject(self, pending_id: str) -> None:
-        """Descarta un cambio pendiente y borra su texto."""
+    def reject(self, pending_id: str) -> RejectResult:
+        """Descarta un cambio pendiente y borra su texto. Si pedía usar una memoria ya guardada,
+        esa memoria sigue: la guardó un agente y se puede borrar con `forget`. También sigue
+        unida al hecho al que quería reemplazar: rechazarla confirma que se contradicen."""
         self._require_person()
-        self._drop_pending(self._require_pending(pending_id).id)
+        change = self._require_pending(pending_id)
+        warnings = self._drop_pending(change.id)
+        return RejectResult(rejected_id=change.id, kept_id=change.new_id, warnings=warnings)
 
     def _require_person(self) -> None:
         if self._origin is not Origin.PERSON:
@@ -377,12 +459,23 @@ class MemoryService:
             raise NotFoundError(tr("No existe el cambio pendiente {id}.", id=valid_id))
         return change
 
-    def _drop_pending(self, pending_id: str) -> None:
+    def _drop_pending(self, pending_id: str) -> list[str]:
         with store.transaction(self._conn):
             store.delete_pending(self._conn, self.workspace_id, pending_id)
-        store.checkpoint(self._conn)
+        return self._erase_from_disk()
 
-    def _close(self, olds: list[Memory], new_id: str, valid_to: datetime) -> None:
+    def _erase_from_disk(self) -> list[str]:
+        """Vacía el registro de cambios. Avisa si otra conexión lo impide."""
+        if store.checkpoint(self._conn):
+            return []
+        return [
+            tr(
+                "Borrado: ya no se puede leer ni buscar. Otra conexión está usando la base, "
+                "así que el texto sigue en sus archivos hasta que se cierre."
+            )
+        ]
+
+    def _close(self, olds: list[Memory], new_id: str, valid_to: datetime, actor: Origin) -> None:
         for old in olds:
             store.mark_superseded(
                 self._conn, self.workspace_id, old.id, valid_to=valid_to, superseded_by_id=new_id
@@ -414,16 +507,27 @@ class MemoryService:
                     )
                 )
             ids = [memory.id for memory in versions]
+            self._check_nothing_waits_for_a_person(ids)
             store.delete_memories(self._conn, self.workspace_id, ids)
-        warnings = []
-        if not store.checkpoint(self._conn):
-            warnings.append(
-                tr(
-                    "Borrado: ya no se puede leer ni buscar. Otra conexión está usando la base, "
-                    "así que el texto sigue en el archivo de registro (-wal) hasta que se cierre."
+        return ForgetResult(deleted_ids=ids, warnings=self._erase_from_disk())
+
+    def _check_nothing_waits_for_a_person(self, ids: list[str]) -> None:
+        """Un agente no puede alterar un cambio que espera a una persona: ni retirarlo olvidando
+        una memoria suya que nombra, ni añadirle historial después de que se haya enseñado."""
+        if self._origin is Origin.PERSON:
+            return
+        for change in store.list_pending(self._conn, self.workspace_id):
+            others = [old_id for old_id in change.old_ids if old_id not in ids]
+            touched = change.new_id in ids or len(others) < len(change.old_ids)
+            facts = [store.get_memory(self._conn, self.workspace_id, other) for other in others]
+            if touched and _outranked(self._origin, [fact for fact in facts if fact is not None]):
+                raise ProtectedError(
+                    tr(
+                        "Hay un cambio pendiente ({id}) que lo nombra junto a un hecho más fiable. "
+                        "Antes lo tiene que aceptar o rechazar una persona.",
+                        id=change.id,
+                    )
                 )
-            )
-        return ForgetResult(deleted_ids=ids, warnings=warnings)
 
     def reindex(self) -> ReindexResult:
         """Calcula los vectores que falten con el modelo configurado."""
@@ -495,31 +599,43 @@ class MemoryService:
         if not result.results:
             return result
         at_ms = store.to_ms(query.as_of if query.as_of is not None else self._now())
-        ids = [hit.memory.id for hit in result.results]
-        clashes = store.contradictions(self._conn, self.workspace_id, ids, at_ms=at_ms)
+        stronger = self._stronger_than([hit.memory for hit in result.results], at_ms)
         by_id = {hit.memory.id: hit for hit in result.results}
-        hits: list[Hit] = []
+        ordered: dict[str, Hit] = {}
         warnings = list(result.warnings)
-        for hit in result.results:
-            stronger = [
-                fact
-                for fact in clashes.get(hit.memory.id, [])
-                if fact.origin.rank > hit.memory.origin.rank
-            ]
-            for fact in stronger:
+
+        def place(hit: Hit) -> None:
+            """Primero lo más fiable, también lo que contradice a lo que se añade."""
+            if hit.memory.id in ordered:
+                return
+            found = stronger.get(hit.memory.id, [])
+            facts = _closest(found, hit.memory)
+            for fact in facts:
                 missing = Hit(memory=fact, score=0.0, matched_by=["trust"])
-                hits.append(by_id.get(fact.id, missing))
-            if stronger:
+                place(by_id.get(fact.id, missing))
+            if facts:
                 warnings.append(
                     tr(
                         "{id} puede contradecir a {facts}, más fiable: si se contradicen, vale "
                         "lo segundo. Díselo al usuario.",
                         id=hit.memory.id,
-                        facts=", ".join(fact.id for fact in stronger),
+                        facts=", ".join(fact.id for fact in facts),
                     )
                 )
-            hits.append(hit)
-        unique = list({hit.memory.id: hit for hit in hits}.values())
+            if len(found) > len(facts):
+                warnings.append(
+                    tr(
+                        "{id} puede contradecir a {n} hechos más que no se muestran: no te fíes "
+                        "de ella sin preguntar al usuario.",
+                        id=hit.memory.id,
+                        n=len(found) - len(facts),
+                    )
+                )
+            ordered[hit.memory.id] = hit
+
+        for hit in result.results:
+            place(hit)
+        unique = list(ordered.values())
         waiting = store.ids_with_pending(
             self._conn, self.workspace_id, [hit.memory.id for hit in unique]
         )
@@ -532,6 +648,24 @@ class MemoryService:
                 )
             )
         return result.model_copy(update={"results": unique, "warnings": warnings})
+
+    def _stronger_than(self, memories: list[Memory], at_ms: int) -> dict[str, list[Memory]]:
+        """Los hechos más fiables con los que choca cada memoria, y los que chocan con ellos: si
+        lo de fuera contradice a un agente y el agente a una persona, salen los tres."""
+        found: dict[str, list[Memory]] = {}
+        level = {memory.id: memory for memory in memories}
+        while level:  # cada paso sube de rango, y solo hay tres
+            clashes = store.contradictions(self._conn, self.workspace_id, list(level), at_ms=at_ms)
+            following: dict[str, Memory] = {}
+            for memory in level.values():
+                found[memory.id] = [
+                    fact
+                    for fact in clashes.get(memory.id, [])
+                    if fact.origin.rank > memory.origin.rank and not _same_text(fact, memory)
+                ]
+                following |= {fact.id: fact for fact in found[memory.id]}
+            level = {key: fact for key, fact in following.items() if key not in found}
+        return found
 
     def _search(self, query: RecallQuery) -> RecallResult:
         """Sin embeddings, o si fallan, cae a la búsqueda de texto y avisa."""
@@ -705,110 +839,91 @@ class MemoryService:
         store.insert_vector(self._conn, space, seq, memory, vector)
 
     def _probe(
-        self, memory: Memory, document_vector: list[float], warnings: list[str]
+        self, text: str, document_vector: list[float] | None, warnings: list[str]
     ) -> list[float] | None:
         """El vector con el que se compara una memoria con los hechos guardados."""
-        assert self._embedder is not None
+        if self._embedder is None or document_vector is None:
+            return None
         purpose = self._embedder.profile.candidate_purpose
-        if purpose == "document":
-            return document_vector
-        return self._embed(memory.content, purpose, warnings)
+        return document_vector if purpose == "document" else self._embed(text, purpose, warnings)
 
-    def _note_clashes(
-        self, memory: Memory, vector: list[float] | None, warnings: list[str]
-    ) -> None:
+    def _note_clashes(self, memory: Memory, probe: list[float] | None) -> None:
         """Apunta con qué hechos de otro rango puede chocar una memoria (ADR-0011).
 
+        Dentro de la transacción que la guarda: si fuera después, borrar a la vez uno de los
+        parecidos podía dejar la memoria guardada y sin ningún choque apuntado.
+
         Con los más fiables, si los hay: `recall` no la devolverá sin ellos. Y al revés: si la
-        nueva es la más fiable, las que ya estaban no saldrán sin ella. También los episodios: una
-        mentira contada como algo que pasó sigue siendo una mentira.
+        nueva es la más fiable, las que ya estaban no saldrán sin ella. También los episodios (una
+        mentira contada como algo que pasó sigue siendo una mentira) y las copias exactas: no
+        contradicen nada hoy, pero sí cuando el hecho cambie.
         """
-        ranked = [origin for origin in Origin if origin.rank != memory.origin.rank]
+        stronger = [origin for origin in Origin if origin.rank > memory.origin.rank]
+        weaker = [origin for origin in Origin if origin.rank < memory.origin.rank]
         clashes: list[tuple[str, str]] = []  # (menos fiable, más fiable)
-        for fact in self._similar_from(memory, vector, ranked, warnings):
-            if fact.content.casefold() == memory.content.casefold():
-                continue  # lo mismo dicho otra vez no es una contradicción
-            if fact.origin.rank > memory.origin.rank:
-                clashes.append((memory.id, fact.id))
-            elif memory.kind is Kind.FACT:
-                clashes.append((fact.id, memory.id))
-        if clashes:
-            with store.transaction(self._conn):
-                for weak, strong in clashes:
-                    store.add_contradictions(self._conn, weak, [strong])
+        if stronger:
+            similar = self._similar_from(memory, probe, stronger, kind=Kind.FACT, limit=CLASH_LIMIT)
+            clashes += [(memory.id, fact.id) for fact in similar]
+        if weaker and memory.kind is Kind.FACT:
+            similar = self._similar_from(memory, probe, weaker, kind=None, limit=WEAKER_LIMIT)
+            clashes += [(weak.id, memory.id) for weak in similar]
+        for weak, strong in clashes:
+            store.add_contradictions(self._conn, weak, [strong])
 
     def _similar_from(
         self,
         memory: Memory,
-        vector: list[float] | None,
+        probe: list[float] | None,
         origins: list[Origin],
-        warnings: list[str],
+        *,
+        kind: Kind | None,
+        limit: int,
     ) -> list[Memory]:
-        at_ms = store.to_ms(self._now())
+        """Las memorias parecidas de esos orígenes, rijan ahora o no: `recall` ya mira las fechas,
+        y así no sirve fechar una mentira en el futuro ni esconderla en el pasado."""
         by_text = True
         found: list[Memory] = []
-        if self._embedder is not None and vector is not None:
-            probe = self._probe(memory, vector, warnings)
-            space = (
-                None
-                if probe is None
-                else store.find_embedding_space(self._conn, self._embedder.model, len(probe))
-            )
-            if probe is not None and space is not None:
-                threshold = self._embedder.profile.candidate_threshold
-                stronger = [origin for origin in origins if origin.rank > memory.origin.rank]
-                if stronger:  # exacta y solo entre los más fiables: no se puede inundar
-                    near = store.similar_facts(
-                        self._conn,
-                        space,
-                        self.workspace_id,
-                        probe,
-                        origins=stronger,
-                        at_ms=at_ms,
-                        limit=CLASH_LIMIT,
-                    )
-                    found += [fact for fact, distance in near if 1.0 - distance >= threshold]
-                weaker = [origin for origin in origins if origin.rank < memory.origin.rank]
-                if memory.origin is Origin.AGENT:  # solo lo de fuera, que suele ser poco
-                    near = store.similar_facts(
-                        self._conn,
-                        space,
-                        self.workspace_id,
-                        probe,
-                        origins=weaker,
-                        at_ms=at_ms,
-                        limit=WEAKER_LIMIT,
-                    )
-                    found += [fact for fact, distance in near if 1.0 - distance >= threshold]
-                elif weaker:  # lo de los agentes es casi todo: con preselección
-                    hits = retrieval.search_vector(
-                        self._conn,
-                        space,
-                        self.workspace_id,
-                        probe,
-                        k=WEAKER_LIMIT,
-                        at_ms=at_ms,
-                        min_similarity=threshold,
-                    )
-                    found += [hit.memory for hit in hits if hit.memory.origin in weaker]
+        if self._embedder is not None and probe is not None:
+            space = store.find_embedding_space(self._conn, self._embedder.model, len(probe))
+            if space is not None:
+                found += store.similar_memories(
+                    self._conn,
+                    space,
+                    self.workspace_id,
+                    probe,
+                    origins=origins,
+                    kind=kind,
+                    max_distance=1.0 - self._embedder.profile.candidate_threshold,
+                    limit=limit,
+                )
                 by_text = store.has_memories_without_vector(self._conn, self.workspace_id, space)
         if by_text:
+            mine = retrieval.words(memory.content)
             for origin in origins:
+                always = CANDIDATE_LIMIT if origin.rank > memory.origin.rank else 0
                 hits = retrieval.search_fts(
                     self._conn,
                     self.workspace_id,
                     memory.content,
-                    k=CANDIDATE_LIMIT,
-                    at_ms=at_ms,
-                    kind=Kind.FACT,
+                    k=limit,
+                    at_ms=None,
+                    kind=kind,
                     exclude_id=memory.id,
                     origins=[origin],
                 )
-                found += [hit.memory for hit in hits]
+                # BM25 no tiene umbral: los primeros, y de los demás los que comparten casi todo.
+                # Hacia lo menos fiable, solo esto último: si no, cada hecho de una persona se
+                # uniría a tres memorias por una palabra en común.
+                found += [
+                    hit.memory
+                    for position, hit in enumerate(hits)
+                    if position < always
+                    or retrieval.share_most(mine, retrieval.words(hit.memory.content))
+                ]
         return [fact for fact in {f.id: f for f in found}.values() if fact.id != memory.id]
 
     def _possible_supersedes(
-        self, memory: Memory, document_vector: list[float] | None, warnings: list[str]
+        self, memory: Memory, probe: list[float] | None, warnings: list[str]
     ) -> list[Hit]:
         """Hechos vigentes parecidos al nuevo. El agente decide si alguno queda reemplazado.
 
@@ -816,41 +931,39 @@ class MemoryService:
         paráfrasis sin palabras en común. Sin embeddings: BM25, más débil.
         """
         at_ms = store.to_ms(self._now())
-        if self._embedder is not None and document_vector is not None:
+        if self._embedder is not None and probe is not None:
             profile = self._embedder.profile
-            probe = self._probe(memory, document_vector, warnings)
-            if probe is not None:
-                space = store.find_embedding_space(self._conn, self._embedder.model, len(probe))
-                if space is None:
-                    return []
-                hits = retrieval.search_vector(
+            space = store.find_embedding_space(self._conn, self._embedder.model, len(probe))
+            if space is None:
+                return []
+            hits = retrieval.search_vector(
+                self._conn,
+                space,
+                self.workspace_id,
+                probe,
+                k=CANDIDATE_LIMIT + 1,
+                at_ms=at_ms,
+                kind=Kind.FACT,
+                min_similarity=profile.candidate_threshold,
+            )
+            candidates = [hit for hit in hits if hit.memory.id != memory.id][:CANDIDATE_LIMIT]
+            if store.has_memories_without_vector(self._conn, self.workspace_id, space):
+                # Un hecho guardado sin vector (el servicio estaba caído, o se usó otro
+                # modelo) solo lo encuentra el texto. Sin esto no se propondría y las dos
+                # versiones quedarían vigentes.
+                found = {hit.memory.id for hit in candidates}
+                by_text = retrieval.search_fts(
                     self._conn,
-                    space,
                     self.workspace_id,
-                    probe,
-                    k=CANDIDATE_LIMIT + 1,
+                    memory.content,
+                    k=CANDIDATE_LIMIT,
                     at_ms=at_ms,
                     kind=Kind.FACT,
-                    min_similarity=profile.candidate_threshold,
+                    exclude_id=memory.id,
                 )
-                candidates = [hit for hit in hits if hit.memory.id != memory.id][:CANDIDATE_LIMIT]
-                if store.has_memories_without_vector(self._conn, self.workspace_id, space):
-                    # Un hecho guardado sin vector (el servicio estaba caído, o se usó otro
-                    # modelo) solo lo encuentra el texto. Sin esto no se propondría y las dos
-                    # versiones quedarían vigentes.
-                    found = {hit.memory.id for hit in candidates}
-                    by_text = retrieval.search_fts(
-                        self._conn,
-                        self.workspace_id,
-                        memory.content,
-                        k=CANDIDATE_LIMIT,
-                        at_ms=at_ms,
-                        kind=Kind.FACT,
-                        exclude_id=memory.id,
-                    )
-                    candidates += [hit for hit in by_text if hit.memory.id not in found]
-                    warnings.append(_without_vector_warning(self._embedder.model))
-                return candidates
+                candidates += [hit for hit in by_text if hit.memory.id not in found]
+                warnings.append(_without_vector_warning(self._embedder.model))
+            return candidates
         return retrieval.search_fts(
             self._conn,
             self.workspace_id,
@@ -911,6 +1024,43 @@ def _results(n: int) -> str:
 def _outranked(actor: Origin, memories: list[Memory]) -> bool:
     """¿Alguna memoria viene de un origen más fiable que quien quiere cambiarla?"""
     return any(memory.origin.rank > actor.rank for memory in memories)
+
+
+def _strongest(memories: list[Memory]) -> Memory:
+    """La más fiable; si hay varias, la primera."""
+    return max(memories, key=lambda memory: memory.origin.rank)
+
+
+def _closest(facts: list[Memory], memory: Memory) -> list[Memory]:
+    """Los que acompañan a una memoria: los más fiables y, si sobran, los que más se parecen."""
+    if len(facts) <= MAX_SHOWN:
+        return facts
+    mine = retrieval.words(memory.content)
+    ranked = sorted(
+        facts,
+        key=lambda fact: (fact.origin.rank, len(mine & retrieval.words(fact.content))),
+        reverse=True,
+    )
+    return ranked[:MAX_SHOWN]
+
+
+def _unique(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(items))
+
+
+def _same_text(one: Memory, other: Memory) -> bool:
+    """Idéntico: en un enlace o un código, cambiar una mayúscula cambia lo que dice."""
+    return one.content == other.content
+
+
+def _start_after(olds: list[Memory], now: datetime) -> datetime:
+    """Sin fecha explícita: ahora, pero siempre después de que empezaran las anteriores."""
+    return max(now, max(old.valid_from for old in olds) + _ONE_MS)
+
+
+def _asks_the_same(one: PendingChange, other: PendingChange) -> bool:
+    identity = {"id", "created_at"}
+    return one.model_dump(exclude=identity) == other.model_dump(exclude=identity)
 
 
 def _check_starts_after(valid_from: datetime, latest_start: datetime) -> None:

@@ -258,6 +258,18 @@ class PendingChange(BaseModel):
         return safety.flags([self.content, self.reason, self.source, *(self.tags or [])])
 
 
+class PendingPreview(BaseModel):
+    """Lo que ocurriría al aceptar un cambio pendiente."""
+
+    olds: list[Memory]
+    content: str
+    already_replaced: list[Memory] = Field(default_factory=list)  # si es una memoria guardada
+    tags: list[str]
+    start: datetime | None  # None = en el momento de aceptarlo
+    flags: list[str]
+    stale: bool  # alguno de los hechos ya no está o ya se reemplazó
+
+
 class RememberResult(BaseModel):
     memory: Memory
     possible_supersedes: list[Hit]
@@ -273,6 +285,12 @@ class SupersedeResult(BaseModel):
 
 class ForgetResult(BaseModel):
     deleted_ids: list[str]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RejectResult(BaseModel):
+    rejected_id: str
+    kept_id: str | None = None  # la memoria que se pedía usar: sigue guardada, sin ser la vigente
     warnings: list[str] = Field(default_factory=list)
 
 
