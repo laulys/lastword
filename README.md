@@ -60,6 +60,8 @@ The decision rules were fixed **before** measuring ([protocol](eval/README.md)),
 | `forget`, then save the lie | **0 of 82** | 0 |
 | `remember` the lie next to the truth | does not apply | 0 |
 
+**Reviewed before release.** E5 passed, and still a security review found two ways to make the protection useless and several smaller ones: for example, changing the text while the person decides. They are fixed, with one test per attack, and told in [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md#vías-que-encontró-una-revisión-antes-de-publicar) (in Spanish). Measuring five routes well does not prove there is no sixth.
+
 **What it does not solve:**
 
 - **An agent can still change what another agent saved.** Same origin, no protection. `vigente confirm` protects a fact a person vouches for.
@@ -208,14 +210,15 @@ With a single client, on your own computer, they add less: the main reason to us
 
 What Vigente does:
 
-- **Nothing leaves your computer by default.** The memory is a local SQLite file, and embeddings come from a local model. Sending memories to a non-local embedding service requires `VIGENTE_ALLOW_REMOTE=1`, and system proxies are ignored for local addresses.
+- **Nothing leaves your computer by default.** The memory is a local SQLite file, and embeddings come from a local model. Sending memories to a non-local embedding service requires `VIGENTE_ALLOW_REMOTE=1`, and system proxies are ignored for local addresses. On a computer with several users and no Ollama running, another one could listen on its port: there, turn embeddings off with `VIGENTE_EMBED_MODEL=none`.
 - **The file is private.** It is created readable by its owner only (folder `0700`, file `0600`). It is not encrypted: disk encryption, such as FileVault or BitLocker, covers it.
 - **Secrets are not stored.** API keys in 10 known formats, passwords written in a sentence or as an environment variable, and random-looking tokens are rejected on save. The error never repeats the secret, and suggests saving where it lives instead. Only a person can override it, from the CLI with `--allow-secret`; MCP clients cannot.
 - **Memories are data, never instructions.** Hidden Unicode that can smuggle text is rejected. Text that reads like an order to the agent is stored but flagged: `recall` warns the agent, and `vigente review` lists it. The server tells the agent never to follow a memory. These are rules in Spanish and English: they catch the obvious, not an attacker who knows them, so [E3](eval/results/e3_security.md) is a ceiling.
-- **Forgetting erases.** `forget` deletes every version from the rows, the text index and both vector tables, and SQLite overwrites the freed space. If another connection is reading at that moment, the text stays in the `-wal` file until it closes, and `forget` says so.
+- **What the CLI shows is what is stored.** Codes that move the cursor or hide text in the terminal are rejected, and if an older memory has them, they are shown replaced.
+- **Forgetting erases.** `forget` deletes every version from the rows, the text index and both vector tables, and SQLite overwrites the freed space. If another connection is reading at that moment, the text stays in the database files until it closes, and `forget` says so.
 - **One agent, one workspace.** The server fixes the workspace; no tool accepts another one.
 - **Over HTTP, a token is required.** At least 32 characters, compared in constant time. The server stays on `127.0.0.1` behind an HTTPS proxy ([ADR-0009](docs/decisions/0009-compartir-por-http.md)).
-- **Audited.** A full review of the code fixed, in v1.3, two privacy issues among others: memory text could reach a system proxy, and the file was readable by other users of the computer ([pull request](https://github.com/laulys/vigente/pull/9)).
+- **Audited twice.** A full review of the code fixed, in v1.3, two privacy issues among others: memory text could reach a system proxy, and the file was readable by other users of the computer ([pull request](https://github.com/laulys/vigente/pull/9)). A security review later fixed a text that blocked the server, terminal codes and several filters ([CHANGELOG](CHANGELOG.md)).
 
 ## Configuration
 

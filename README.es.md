@@ -60,6 +60,8 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 | `forget` y después guardar la mentira | **0 de 82** | 0 |
 | `remember` de la mentira junto a la verdad | no aplica | 0 |
 
+**Revisada antes de publicarla.** E5 cumplía, y aun así una revisión de seguridad encontró dos formas de dejar la protección sin efecto y varias menores: por ejemplo, cambiar el texto mientras la persona decide. Están corregidas, con un test por ataque, y contadas en el [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md#vías-que-encontró-una-revisión-antes-de-publicar). Medir bien cinco vías no demuestra que no haya una sexta.
+
 **Lo que no resuelve:**
 
 - **Un agente puede seguir cambiando lo que guardó otro agente.** Mismo origen, sin protección. `vigente confirm` protege un hecho que una persona da por bueno.
@@ -208,14 +210,15 @@ Con un solo cliente, en tu propio ordenador, aportan menos: entonces la razón p
 
 Qué hace Vigente:
 
-- **Por defecto, nada sale de tu ordenador.** La memoria es un archivo SQLite local, y los embeddings los calcula un modelo local. Enviar memorias a un servicio de embeddings no local exige `VIGENTE_ALLOW_REMOTE=1`, y con direcciones locales se ignoran los proxies del sistema.
+- **Por defecto, nada sale de tu ordenador.** La memoria es un archivo SQLite local, y los embeddings los calcula un modelo local. Enviar memorias a un servicio de embeddings no local exige `VIGENTE_ALLOW_REMOTE=1`, y con direcciones locales se ignoran los proxies del sistema. En un ordenador con varios usuarios y sin Ollama en marcha, otro podría escuchar en su puerto: ahí, desactiva los embeddings con `VIGENTE_EMBED_MODEL=none`.
 - **El archivo es privado.** Se crea legible solo para su dueño (carpeta `0700`, archivo `0600`). No está cifrado: lo protege el cifrado del disco, como FileVault o BitLocker.
 - **Los secretos no se guardan.** Se rechazan al guardar las claves de API de 10 formatos conocidos, las contraseñas escritas en una frase o como variable de entorno, y los tokens con aspecto aleatorio. El error no repite el secreto y propone guardar dónde está. Solo una persona puede saltárselo, desde la CLI con `--allow-secret`; los clientes MCP no pueden.
 - **Las memorias son datos, nunca órdenes.** Se rechazan los caracteres Unicode invisibles que pueden esconder texto. El texto que suena a orden para el agente se guarda marcado: `recall` avisa al agente y `vigente review` lo lista. El servidor le dice al agente que nunca siga una memoria. Son reglas en español e inglés: cazan lo evidente, no a un atacante que las conozca, así que [E3](eval/results/e3_security.md) es un techo.
-- **Olvidar borra.** `forget` elimina todas las versiones de las filas, del índice de texto y de las dos tablas de vectores, y SQLite sobrescribe el espacio liberado. Si en ese momento otra conexión está leyendo, el texto sigue en el archivo `-wal` hasta que se cierre, y `forget` lo avisa.
+- **Lo que enseña la CLI es lo que hay guardado.** Se rechazan los códigos que mueven el cursor o esconden texto en el terminal, y si una memoria antigua los tiene, salen sustituidos.
+- **Olvidar borra.** `forget` elimina todas las versiones de las filas, del índice de texto y de las dos tablas de vectores, y SQLite sobrescribe el espacio liberado. Si en ese momento otra conexión está leyendo, el texto sigue en los archivos de la base hasta que se cierre, y `forget` lo avisa.
 - **Un agente, un workspace.** El servidor fija el workspace; ninguna herramienta acepta otro.
 - **Por HTTP, el token es obligatorio.** De al menos 32 caracteres, comparado en tiempo constante. El servidor se queda en `127.0.0.1` detrás de un proxy HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)).
-- **Auditado.** Una revisión completa del código corrigió en la v1.3, entre otros, dos problemas de privacidad: el texto de las memorias podía llegar a un proxy del sistema, y otros usuarios del ordenador podían leer el archivo ([pull request](https://github.com/laulys/vigente/pull/9)).
+- **Auditado dos veces.** Una revisión completa del código corrigió en la v1.3, entre otros, dos problemas de privacidad: el texto de las memorias podía llegar a un proxy del sistema, y otros usuarios del ordenador podían leer el archivo ([pull request](https://github.com/laulys/vigente/pull/9)). Otra, de seguridad, corrigió después un texto que bloqueaba el servidor, códigos de terminal y varios filtros ([CHANGELOG](CHANGELOG.md)).
 
 ## Configuración
 

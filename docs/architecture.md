@@ -291,7 +291,7 @@ Lo que sigue de esta sección es el plan original.
 Qué se decidió y qué alternativas se descartaron está en el [ADR-0007](decisions/0007-seguridad-de-la-memoria.md). Aquí, cómo encaja:
 
 - **[`safety.py`](../src/vigente/safety.py)** reúne las reglas: expresiones regulares y una medida de entropía, sin dependencias ni LLM.
-- **Al guardar,** `service.remember` y `service.supersede` comprueban el contenido, la fuente, el motivo y las etiquetas antes de calcular el embedding. Los secretos y los caracteres *tag* o bidireccionales se rechazan. Solo la CLI pasa `allow_secrets`; el servidor MCP no tiene forma de hacerlo.
+- **Al guardar,** `service.remember` y `service.supersede` comprueban el contenido, la fuente, el motivo y las etiquetas antes de calcular el embedding. Los secretos y los caracteres *tag* o bidireccionales, los selectores de variación fuera de sitio y los códigos de terminal se rechazan. Solo la CLI pasa `allow_secrets`; el servidor MCP no tiene forma de hacerlo.
 - **Al leer,** `Memory.flags` es un campo calculado, no una columna: cubre las memorias anteriores sin migrar la base, y las reglas pueden mejorar sin reescribir datos.
 - **Coste medido:** unos 13 µs por memoria al guardar y unos 25 µs por memoria leída. `vigente review` recorre el workspace entero, así que con 50.000 memorias rondaría el segundo (estimación, no medida).
 - **Evaluación:** E3 ([informe](../eval/results/e3_security.md)), con casos y reglas fijados antes de escribir los detectores, y una comprobación con los mensajes reales de LongMemEval que llevó a corregir la regla de tokens.
