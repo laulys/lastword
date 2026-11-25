@@ -219,7 +219,9 @@ class TestClearErrors:
         error = json.loads(result.stderr)
         assert (error["code"], "ocupada" in error["message"]) == ("database", True)
 
-    @pytest.mark.parametrize("date", ["2024", "9999-12-31T23:59:59.999Z", "0001-01-01T00:00+05:00"])
+    @pytest.mark.parametrize(
+        "date", ["2024", ".5", "1.7e9", "9999-12-31T23:59:59.999Z", "0001-01-01T00:00+05:00"]
+    )
     def test_a_date_that_is_not_a_date(self, db_path: Path, date: str) -> None:
         result = run(db_path, "add", "Ana vive en Madrid", "--valid-from", date)
         assert result.exit_code == 2

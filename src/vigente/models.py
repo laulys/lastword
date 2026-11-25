@@ -68,16 +68,13 @@ class Status(StrEnum):
 
 
 MAX_YEAR = 9998  # el final de 9999 es la marca de «sin fecha de fin» en la base de datos
-_NUMBER = re.compile(r"[+-]?\d+(?:\.\d+)?")
+_ISO_DATE = re.compile(r"\s*[+-]?\d{4}-\d{2}-\d{2}")
 
 
 def _only_iso(value: object) -> object:
     """Pydantic lee un número, también escrito como texto, como segundos desde 1970: «2024»
     acabaría siendo el 1 de enero de 1970. Una fecha se escribe en ISO 8601."""
-    is_number = isinstance(value, int | float) or (
-        isinstance(value, str) and _NUMBER.fullmatch(value.strip()) is not None
-    )
-    if is_number:
+    if isinstance(value, int | float) or (isinstance(value, str) and not _ISO_DATE.match(value)):
         raise ValueError(tr("escribe la fecha en formato ISO 8601, por ejemplo 2026-03-01"))
     return value
 
