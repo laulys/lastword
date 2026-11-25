@@ -107,4 +107,5 @@ uv run python eval/scale.py                  # latencia y escala
 uv run python eval/e3_security.py            # seguridad; con LongMemEval descargado, también texto real
 uv run python eval/e4_exact.py               # códigos exactos
 uv run python eval/masked_similarity.py      # propuestas con los valores tapados (ADR-0004)
+uv run python eval/false_replacement.py      # un dato falso reemplaza a uno verdadero (ADR-0011)
 ```
