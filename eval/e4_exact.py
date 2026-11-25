@@ -15,10 +15,10 @@ from pathlib import Path
 from exact_cases import DISTRACTORS, cases, has_codes
 from metrics import pct, rank_metrics
 
-from vigente import retrieval, store
-from vigente.config import EmbeddingSettings
-from vigente.models import Hit, Kind, NewMemory
-from vigente.service import MemoryService
+from lastword import retrieval, store
+from lastword.config import EmbeddingSettings
+from lastword.models import Hit, Kind, NewMemory
+from lastword.service import MemoryService
 
 HERE = Path(__file__).parent
 RESULTS_MD = HERE / "results" / "e4_exact.md"

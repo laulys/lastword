@@ -24,8 +24,8 @@ from pathlib import Path
 
 from metrics import cosine, f_beta
 
-from vigente.config import EmbeddingSettings
-from vigente.service import CANDIDATE_LIMIT
+from lastword.config import EmbeddingSettings
+from lastword.service import CANDIDATE_LIMIT
 
 HERE = Path(__file__).parent
 DATA = HERE / "data" / "embedding_choice.json"
@@ -94,7 +94,7 @@ def main() -> None:
 
     embedder = EmbeddingSettings.from_env().build()
     if embedder is None:
-        raise SystemExit("Hace falta un modelo de embeddings (VIGENTE_EMBED_MODEL).")
+        raise SystemExit("Hace falta un modelo de embeddings (LASTWORD_EMBED_MODEL).")
     current = embedder.profile.candidate_threshold
     texts = [statement.text for statement in statements]
     fact_vectors = embedder.embed(facts, "document")
@@ -116,7 +116,7 @@ def main() -> None:
         return max(scores, key=lambda s: (s.f2, s.threshold))
 
     rows = [
-        ("completa (la de Vigente)", best(full)),
+        ("completa (la de Lastword)", best(full)),
         ("con los valores tapados", best(masked)),
         ("media de las dos", best(mean)),
     ]
@@ -130,7 +130,7 @@ def main() -> None:
         "",
         f"Ejemplo: «{facts[1]}» se compara como «{mask(facts[1])}».",
         "",
-        f"Cada variante, con su mejor umbral. El umbral actual de Vigente es {current}.",
+        f"Cada variante, con su mejor umbral. El umbral actual de Lastword es {current}.",
         "",
         "| Similitud | Umbral | F2 | Precisión | Recall | Frases del mismo tema con propuesta |",
         "|---|---:|---:|---:|---:|---:|",

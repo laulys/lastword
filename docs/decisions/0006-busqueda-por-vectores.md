@@ -24,7 +24,7 @@ En E2, solo vectores también gana en Recall@5 *all*: 94% frente a 89%. La mayor
 ## Decisión
 
 - **`recall` busca por defecto solo por vectores.**
-- **La híbrida y la de solo texto siguen disponibles** con `VIGENTE_SEARCH_MODE=hybrid|text` (o `--search-mode` en la CLI).
+- **La híbrida y la de solo texto siguen disponibles** con `LASTWORD_SEARCH_MODE=hybrid|text` (o `--search-mode` en la CLI).
 - **Sin modelo de embeddings, o si el servicio falla, se sigue cayendo a texto,** con un aviso.
 - **En modo vector, BM25 solo se ejecuta como respaldo:** sin embeddings, o si hay memorias sin vector (guardadas con el servicio caído), que la búsqueda por vectores no encontraría. En ese caso se combina con texto y se avisa. Lo detectó la revisión de código.
 - **En la híbrida, los vectores tienen prioridad en los empates.** El desempate ya no depende del id: los ULID tienen una parte aleatoria, y los resultados de la evaluación cambiaban entre ejecuciones (lo detectó un gráfico que no cuadraba).

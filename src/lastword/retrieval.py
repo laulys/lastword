@@ -6,8 +6,8 @@ import re
 import sqlite3
 from collections.abc import Sequence
 
-from vigente import store
-from vigente.models import Hit, Kind, Origin
+from lastword import store
+from lastword.models import Hit, Kind, Origin
 
 MAX_QUERY_TOKENS = 32
 RRF_K = 60  # constante habitual de Reciprocal Rank Fusion
@@ -155,7 +155,7 @@ def hybrid(
     limit: int,
     vector_weight: float = 1.0,
 ) -> list[Hit]:
-    """Fusión híbrida de Vigente: los vectores tienen prioridad en los empates, porque fueron
+    """Fusión híbrida de Lastword: los vectores tienen prioridad en los empates, porque fueron
     el modo más preciso en la evaluación (eval/results/decisions.md)."""
     return reciprocal_rank_fusion(
         [vector_hits, text_hits], limit=limit, weights=[vector_weight, 1.0]

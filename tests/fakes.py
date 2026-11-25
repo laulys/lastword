@@ -6,9 +6,9 @@ import re
 import zlib
 from collections.abc import Mapping, Sequence
 
-from vigente.embeddings import ModelProfile, Purpose
-from vigente.errors import EmbeddingError
-from vigente.retrieval import STOPWORDS
+from lastword.embeddings import ModelProfile, Purpose
+from lastword.errors import EmbeddingError
+from lastword.retrieval import STOPWORDS
 
 # Para FakeEmbedder, estas palabras significan lo mismo: «base de datos».
 DATABASE_WORDS = {"postgresql": "bd", "sqlite": "bd", "base": "bd", "datos": "bd"}

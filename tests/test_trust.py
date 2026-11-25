@@ -14,19 +14,17 @@ import pytest
 from mcp import Client
 from typer.testing import CliRunner
 
-from tests.fakes import FakeEmbedder
-from tests.helpers import FakeClock, disk_bytes, recall_ids, remember, supersede
-from vigente import store
-from vigente.cli import app
-from vigente.config import Settings
-from vigente.errors import (
+from lastword import store
+from lastword.cli import app
+from lastword.config import Settings
+from lastword.errors import (
     AlreadySupersededError,
     NotFoundError,
     PendingConfirmationError,
     ProtectedError,
 )
-from vigente.mcp_server import create_server
-from vigente.models import (
+from lastword.mcp_server import create_server
+from lastword.models import (
     Kind,
     ListQuery,
     Memory,
@@ -35,7 +33,9 @@ from vigente.models import (
     RecallQuery,
     SupersedeRequest,
 )
-from vigente.service import MAX_PENDING, MAX_SHOWN, MemoryService
+from lastword.service import MAX_PENDING, MAX_SHOWN, MemoryService
+from tests.fakes import FakeEmbedder
+from tests.helpers import FakeClock, disk_bytes, recall_ids, remember, supersede
 
 TRUE = "El proveedor Lumbre cobra en la cuenta acabada en 4471"
 LIE = "El proveedor Lumbre cobra en la cuenta acabada en 9902"
@@ -153,7 +153,7 @@ class TestForgetting:
     def test_an_agent_cannot_forget_what_a_person_saved(
         self, agent: MemoryService, person: MemoryService, fact: Memory
     ) -> None:
-        with pytest.raises(ProtectedError, match="vigente forget"):
+        with pytest.raises(ProtectedError, match="lastword forget"):
             agent.forget(fact.id)
         assert still_holds(agent, fact)
         assert person.forget(fact.id).deleted_ids == [fact.id]
@@ -632,7 +632,7 @@ class TestInterfaces:
     def test_the_cli_is_a_person_and_decides(
         self, db_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
     ) -> None:
-        monkeypatch.setenv("VIGENTE_EMBED_MODEL", "none")
+        monkeypatch.setenv("LASTWORD_EMBED_MODEL", "none")
         runner = CliRunner()
 
         def run(*args: str) -> str:
@@ -657,7 +657,7 @@ class TestInterfaces:
     def test_pending_shows_all_that_would_be_applied(
         self, db_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
     ) -> None:
-        monkeypatch.setenv("VIGENTE_EMBED_MODEL", "none")
+        monkeypatch.setenv("LASTWORD_EMBED_MODEL", "none")
         with MemoryServiceAsPerson(db_path, clock) as person:
             fact = remember(person, TRUE, tags=["pagos"])
         agent = MemoryService.open(db_path, "test")
@@ -686,7 +686,7 @@ class TestInterfaces:
     def test_pending_never_crops_the_text(
         self, db_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock, width: str
     ) -> None:
-        monkeypatch.setenv("VIGENTE_EMBED_MODEL", "none")
+        monkeypatch.setenv("LASTWORD_EMBED_MODEL", "none")
         with MemoryServiceAsPerson(db_path, clock) as person:
             fact = remember(person, TRUE)
         agent = MemoryService.open(db_path, "test")
@@ -694,13 +694,13 @@ class TestInterfaces:
             agent, old_id=fact.id, new_content="Cobra en la 4471 o en la 9902 desde hoy"
         )
         agent.close()
-        env = {**os.environ, "COLUMNS": width, "VIGENTE_LANG": "es"}
+        env = {**os.environ, "COLUMNS": width, "LASTWORD_LANG": "es"}
         for command, expected in (
             ("pending", (change, "9902", "4471", "hoy")),
             ("list", ("4471",)),
         ):
             shown = subprocess.run(
-                [sys.executable, "-m", "vigente", "--db", db_path, "-w", "test", command],
+                [sys.executable, "-m", "lastword", "--db", db_path, "-w", "test", command],
                 env=env,
                 capture_output=True,
                 text=True,

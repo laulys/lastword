@@ -1,6 +1,6 @@
 """Prueba de integración con un modelo real. Requiere Ollama en local:
 
-VIGENTE_TEST_OLLAMA=1 uv run pytest tests/test_ollama.py
+LASTWORD_TEST_OLLAMA=1 uv run pytest tests/test_ollama.py
 """
 
 from __future__ import annotations
@@ -10,16 +10,16 @@ import sqlite3
 
 import pytest
 
+from lastword.config import DEFAULT_EMBED_MODEL
+from lastword.embeddings import OpenAICompatibleEmbedder
+from lastword.models import NewMemory
+from lastword.service import MemoryService
 from tests.helpers import FakeClock, recall_ids, remember
-from vigente.config import DEFAULT_EMBED_MODEL
-from vigente.embeddings import OpenAICompatibleEmbedder
-from vigente.models import NewMemory
-from vigente.service import MemoryService
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("VIGENTE_TEST_OLLAMA"), reason="requiere Ollama: VIGENTE_TEST_OLLAMA=1"
+    not os.environ.get("LASTWORD_TEST_OLLAMA"), reason="requiere Ollama: LASTWORD_TEST_OLLAMA=1"
 )
-MODEL = os.environ.get("VIGENTE_TEST_OLLAMA_MODEL", DEFAULT_EMBED_MODEL)
+MODEL = os.environ.get("LASTWORD_TEST_OLLAMA_MODEL", DEFAULT_EMBED_MODEL)
 
 
 def test_a_real_model_detects_a_paraphrased_update(

@@ -194,7 +194,7 @@
       "other@1": 0.5116279069767442,
       "n": 129
     },
-    "vigente | texto | presente": {
+    "lastword | texto | presente": {
       "recall@1": 0.3333333333333333,
       "recall@5": 0.875,
       "mrr": 0.5322475749559082,
@@ -203,7 +203,7 @@
       "other@1": 0.6666666666666666,
       "n": 72
     },
-    "vigente | texto | todas": {
+    "lastword | texto | todas": {
       "recall@1": 0.46511627906976744,
       "recall@5": 0.9069767441860465,
       "mrr": 0.6319521348591116,
@@ -212,7 +212,7 @@
       "other@1": 0.5348837209302325,
       "n": 129
     },
-    "vigente | vector | presente": {
+    "lastword | vector | presente": {
       "recall@1": 0.9027777777777778,
       "recall@5": 1.0,
       "mrr": 0.9449074074074074,
@@ -221,7 +221,7 @@
       "other@1": 0.09722222222222222,
       "n": 72
     },
-    "vigente | vector | todas": {
+    "lastword | vector | todas": {
       "recall@1": 0.9457364341085271,
       "recall@5": 1.0,
       "mrr": 0.969250645994832,
@@ -230,7 +230,7 @@
       "other@1": 0.05426356589147287,
       "n": 129
     },
-    "vigente | híbrida | presente": {
+    "lastword | híbrida | presente": {
       "recall@1": 0.75,
       "recall@5": 1.0,
       "mrr": 0.8564814814814814,
@@ -239,7 +239,7 @@
       "other@1": 0.25,
       "n": 72
     },
-    "vigente | híbrida | todas": {
+    "lastword | híbrida | todas": {
       "recall@1": 0.7906976744186046,
       "recall@5": 1.0,
       "mrr": 0.8837209302325582,
@@ -248,7 +248,7 @@
       "other@1": 0.20930232558139536,
       "n": 129
     },
-    "vigente | híbrida ponderada | presente": {
+    "lastword | híbrida ponderada | presente": {
       "recall@1": 0.8611111111111112,
       "recall@5": 1.0,
       "mrr": 0.9282407407407407,
@@ -257,7 +257,7 @@
       "other@1": 0.1388888888888889,
       "n": 72
     },
-    "vigente | híbrida ponderada | todas": {
+    "lastword | híbrida ponderada | todas": {
       "recall@1": 0.9069767441860465,
       "recall@5": 1.0,
       "mrr": 0.9521963824289406,
@@ -266,7 +266,7 @@
       "other@1": 0.09302325581395349,
       "n": 129
     },
-    "vigente | automática | presente": {
+    "lastword | automática | presente": {
       "recall@1": 0.9027777777777778,
       "recall@5": 1.0,
       "mrr": 0.9449074074074074,
@@ -275,7 +275,7 @@
       "other@1": 0.09722222222222222,
       "n": 72
     },
-    "vigente | automática | todas": {
+    "lastword | automática | todas": {
       "recall@1": 0.9457364341085271,
       "recall@5": 1.0,
       "mrr": 0.969250645994832,
@@ -374,7 +374,7 @@
       "other@1": 0.5964912280701754,
       "n": 57
     },
-    "vigente | texto | con fecha": {
+    "lastword | texto | con fecha": {
       "recall@1": 0.631578947368421,
       "recall@5": 0.9473684210526315,
       "mrr": 0.7578947368421053,
@@ -383,7 +383,7 @@
       "other@1": 0.3684210526315789,
       "n": 57
     },
-    "vigente | vector | con fecha": {
+    "lastword | vector | con fecha": {
       "recall@1": 1.0,
       "recall@5": 1.0,
       "mrr": 1.0,
@@ -392,7 +392,7 @@
       "other@1": 0,
       "n": 57
     },
-    "vigente | híbrida | con fecha": {
+    "lastword | híbrida | con fecha": {
       "recall@1": 0.8421052631578947,
       "recall@5": 1.0,
       "mrr": 0.9181286549707602,
@@ -401,7 +401,7 @@
       "other@1": 0.15789473684210525,
       "n": 57
     },
-    "vigente | híbrida ponderada | con fecha": {
+    "lastword | híbrida ponderada | con fecha": {
       "recall@1": 0.9649122807017544,
       "recall@5": 1.0,
       "mrr": 0.9824561403508771,
@@ -410,7 +410,7 @@
       "other@1": 0.03508771929824561,
       "n": 57
     },
-    "vigente | automática | con fecha": {
+    "lastword | automática | con fecha": {
       "recall@1": 1.0,
       "recall@5": 1.0,
       "mrr": 1.0,

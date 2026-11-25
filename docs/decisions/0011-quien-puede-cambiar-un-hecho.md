@@ -6,9 +6,9 @@
 
 ## Contexto
 
-Los filtros del ADR-0007 buscan secretos, caracteres ocultos y órdenes. Un dato falso escrito como una frase normal no es ninguna de las tres cosas: «el proveedor cobra en la cuenta acabada en 9902» pasa. Y si llega por `supersede`, cierra el hecho verdadero: la mejor función de Vigente es también la mejor forma de atacarla.
+Los filtros del ADR-0007 buscan secretos, caracteres ocultos y órdenes. Un dato falso escrito como una frase normal no es ninguna de las tres cosas: «el proveedor cobra en la cuenta acabada en 9902» pasa. Y si llega por `supersede`, cierra el hecho verdadero: la mejor función de Lastword es también la mejor forma de atacarla.
 
-[ShadowMerge](https://arxiv.org/abs/2605.09033) (Luo y otros, mayo de 2026) estudia este tipo de ataque en memorias en grafo: en vez de una orden, introduce una relación corriente que contradice a la verdadera. Sus autores miden un 93,8% de éxito medio sobre Mem0, concluyen que las defensas de entrada representativas no bastan, y señalan como líneas de defensa la procedencia, la autoridad de quien escribe y la resolución de conflictos. Vigente no es un grafo y no se ha ejecutado ShadowMerge contra él, pero la idea se traslada.
+[ShadowMerge](https://arxiv.org/abs/2605.09033) (Luo y otros, mayo de 2026) estudia este tipo de ataque en memorias en grafo: en vez de una orden, introduce una relación corriente que contradice a la verdadera. Sus autores miden un 93,8% de éxito medio sobre Mem0, concluyen que las defensas de entrada representativas no bastan, y señalan como líneas de defensa la procedencia, la autoridad de quien escribe y la resolución de conflictos. Lastword no es un grafo y no se ha ejecutado ShadowMerge contra él, pero la idea se traslada.
 
 ## Evidencia
 
@@ -59,7 +59,7 @@ La idea no es nueva. Lo que no se encontró junto en ninguno de los tres es apli
 - ⚠️ **Un agente engañado puede no declarar que algo es externo.** Contaría como `agent`: basta para no tocar lo de una persona, no para proteger lo de otro agente.
 - ⚠️ **Por HTTP, todos comparten un token** (ADR-0009). Para distinguir clientes haría falta un token por cliente.
 - ⚠️ **Quien puede ejecutar la CLI es `person`**, también un agente con acceso a la terminal.
-- ⚠️ **Lo guardado antes de la v7 no se compara al migrar.** Una mentira antigua no queda unida al hecho verdadero hasta que se confirma o se cambia: `vigente confirm <id>` lo comprueba.
+- ⚠️ **Lo guardado antes de la v7 no se compara al migrar.** Una mentira antigua no queda unida al hecho verdadero hasta que se confirma o se cambia: `lastword confirm <id>` lo comprueba.
 - ⚠️ **Con una memoria salen como mucho 20 hechos más fiables,** los más parecidos, y un aviso con cuántos faltan. Una mentira escrita para parecerse a más de 20 podría dejar fuera el que contradice.
 - ⚠️ **Solo se apuntan 1.000 memorias de agentes parecidas** al guardar un hecho de una persona, las más parecidas primero.
 - ⚠️ **Un agente puede cambiar un hecho suyo que está en un cambio pendiente.** El cambio sale entonces como «ya no se puede aceptar» y hay que pedirlo otra vez.

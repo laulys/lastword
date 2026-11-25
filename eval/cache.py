@@ -14,7 +14,7 @@ from array import array
 from collections.abc import Sequence
 from pathlib import Path
 
-from vigente.embeddings import Embedder, ModelProfile, Purpose
+from lastword.embeddings import Embedder, ModelProfile, Purpose
 
 CACHE_DIR = Path(__file__).parent / "datasets" / "cache"
 

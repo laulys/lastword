@@ -4,11 +4,11 @@ Generado por `eval/masked_similarity.py` con `embeddinggemma`, sobre el conjunto
 
 Ejemplo: «Ana vive en Madrid.» se compara como «Ana vive en X.».
 
-Cada variante, con su mejor umbral. El umbral actual de Vigente es 0.51.
+Cada variante, con su mejor umbral. El umbral actual de Lastword es 0.51.
 
 | Similitud | Umbral | F2 | Precisión | Recall | Frases del mismo tema con propuesta |
 |---|---:|---:|---:|---:|---:|
-| completa (la de Vigente) | 0.51 | 0.859 | 63% | 94% | 10 de 10 |
+| completa (la de Lastword) | 0.51 | 0.859 | 63% | 94% | 10 de 10 |
 | con los valores tapados | 0.61 | 0.750 | 54% | 83% | 7 de 10 |
 | media de las dos | 0.56 | 0.842 | 59% | 94% | 9 de 10 |
 

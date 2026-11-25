@@ -25,8 +25,8 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from vigente.errors import HiddenCharactersError, SecretDetectedError
-from vigente.i18n import tr
+from lastword.errors import HiddenCharactersError, SecretDetectedError
+from lastword.i18n import tr
 
 
 @dataclass(frozen=True)

@@ -21,9 +21,9 @@ from longmemeval import PATH as LONGMEMEVAL
 from longmemeval import load
 from security_cases import Case, all_groups
 
-from vigente import safety
-from vigente.errors import HiddenCharactersError, VigenteError
-from vigente.models import MAX_CONTENT_CHARS
+from lastword import safety
+from lastword.errors import HiddenCharactersError, LastwordError
+from lastword.models import MAX_CONTENT_CHARS
 
 RESULTS = Path(__file__).parent / "results"
 RESULTS_MD = RESULTS / "e3_security.md"
@@ -105,7 +105,7 @@ def real_messages() -> dict[str, Any] | None:
     for text in texts:
         try:
             safety.check_before_saving([text])
-        except VigenteError as exc:
+        except LastwordError as exc:
             rejected[exc.code] += 1
         found = safety.find_instructions(text)
         flagged_messages += bool(found)
@@ -191,7 +191,7 @@ def report(
     orders_line = (
         "`recall` **avisa** al agente: como mucho 4 falsas marcas de 40."
         if decisions["warn_on_recall"]
-        else "demasiadas falsas marcas: solo se ven con `vigente review`."
+        else "demasiadas falsas marcas: solo se ven con `lastword review`."
     )
     lines = [
         "# E3: filtros de seguridad",

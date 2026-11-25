@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from lastword import store
+from lastword.errors import HiddenCharactersError, SecretDetectedError
+from lastword.ids import new_ulid
+from lastword.models import Kind, Memory, NewMemory, RecallQuery, SupersedeRequest
+from lastword.service import MemoryService
 from tests.helpers import T0, remember, supersede
-from vigente import store
-from vigente.errors import HiddenCharactersError, SecretDetectedError
-from vigente.ids import new_ulid
-from vigente.models import Kind, Memory, NewMemory, RecallQuery, SupersedeRequest
-from vigente.service import MemoryService
 
 # Montada por partes: ninguna línea del repositorio tiene forma de clave.
 STRIPE_KEY = "sk" + "_live_" + "4eC39HqLyjWDarjtT1zdp7dc"

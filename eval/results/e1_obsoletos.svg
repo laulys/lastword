@@ -31,7 +31,7 @@
 <text x="527.3" y="263.0" text-anchor="middle" fill="#1f2328">0%</text>
 <rect x="551.4" y="256.1" width="40.2" height="11.9" fill="#9aa4b2"><title>otro dato o un episodio: 5%</title></rect>
 <text x="571.5" y="251.1" text-anchor="middle" fill="#1f2328">5%</text>
-<text x="529.3" y="288" text-anchor="middle" fill="#1f2328">vigente</text>
+<text x="529.3" y="288" text-anchor="middle" fill="#1f2328">lastword</text>
 <rect x="56" y="314" width="12" height="12" fill="#2f7d5b"/>
 <text x="74" y="324" fill="#1f2328">el dato correcto</text>
 <rect x="198" y="314" width="12" height="12" fill="#e0913b"/>

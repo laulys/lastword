@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner, Result
 
-from vigente import store
-from vigente.cli import _json, app
+from lastword import store
+from lastword.cli import _json, app
 
 runner = CliRunner()
 
@@ -17,7 +17,7 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def _without_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Los tests de la CLI no dependen de que Ollama esté corriendo."""
-    monkeypatch.setenv("VIGENTE_EMBED_MODEL", "none")
+    monkeypatch.setenv("LASTWORD_EMBED_MODEL", "none")
 
 
 def run(db_path: Path, *args: str, input: str | None = None, as_json: bool = True) -> Result:
@@ -103,7 +103,7 @@ def test_refuses_remote_embedding_services_without_permission(db_path: Path) -> 
         db_path, "--embed-model", "m", "--embed-url", "https://api.example.com/v1", "stats"
     )
     assert result.exit_code == 1, result.output
-    assert "VIGENTE_ALLOW_REMOTE" in result.output
+    assert "LASTWORD_ALLOW_REMOTE" in result.output
 
 
 def test_reindex_without_a_model_is_a_config_error(db_path: Path) -> None:
@@ -134,10 +134,12 @@ def test_list_shows_the_state_by_date_not_by_status(db_path: Path) -> None:
 def test_search_mode_from_the_environment_ignores_case(
     db_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("VIGENTE_SEARCH_MODE", " Hybrid ")  # el servidor MCP también lo acepta
+    monkeypatch.setenv("LASTWORD_SEARCH_MODE", " Hybrid ")  # el servidor MCP también lo acepta
     ok(run(db_path, "add", "Ana vive en Madrid"))
     assert ok(run(db_path, "search", "Ana"))["mode"] == "fts_only"  # sin embeddings en los tests
-    monkeypatch.setenv("VIGENTE_SEARCH_MODE", "rapido")  # se lee de verdad: uno que no existe falla
+    monkeypatch.setenv(
+        "LASTWORD_SEARCH_MODE", "rapido"
+    )  # se lee de verdad: uno que no existe falla
     assert run(db_path, "search", "Ana").exit_code == 2
 
 

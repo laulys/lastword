@@ -1,18 +1,18 @@
-# Vigente
+# Lastword
 
-[![CI](https://github.com/laulys/vigente/actions/workflows/ci.yml/badge.svg)](https://github.com/laulys/vigente/actions/workflows/ci.yml)
+[![CI](https://github.com/laulys/lastword/actions/workflows/ci.yml/badge.svg)](https://github.com/laulys/lastword/actions/workflows/ci.yml)
 [![Licencia: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)
 
 **Memoria para agentes de IA que sabe qué sigue siendo verdad.** · [Read in English](README.md)
 
-Cuando un hecho cambia, la mayoría de las memorias para agentes lo sobrescriben, o guardan las dos versiones y confían en que la búsqueda acierte. Vigente no hace ninguna de las dos cosas. El hecho anterior queda **reemplazado**: se cierra con una fecha y se enlaza con su sustituto.
+Cuando un hecho cambia, la mayoría de las memorias para agentes lo sobrescriben, o guardan las dos versiones y confían en que la búsqueda acierte. Lastword no hace ninguna de las dos cosas. El hecho anterior queda **reemplazado**: se cierra con una fecha y se enlaza con su sustituto.
 
 - La búsqueda devuelve solo lo que es verdad **ahora**.
 - `as_of` devuelve lo que era verdad **en cualquier fecha pasada**.
 - `history` muestra cómo cambió un hecho.
 
-Una memoria que comparten varios agentes, y que dura entre sesiones, también es una superficie de ataque: OWASP pone el *envenenamiento de memoria y contexto* entre los principales riesgos de las aplicaciones con agentes ([ASI06](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/)). Por eso Vigente también **vigila lo que entra**:
+Una memoria que comparten varios agentes, y que dura entre sesiones, también es una superficie de ataque: OWASP pone el *envenenamiento de memoria y contexto* entre los principales riesgos de las aplicaciones con agentes ([ASI06](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/)). Por eso Lastword también **vigila lo que entra**:
 
 - Rechaza los secretos al guardar: nunca los almacena.
 - Rechaza los caracteres Unicode invisibles que pueden esconder instrucciones.
@@ -22,15 +22,15 @@ Son reglas fijas, sin LLM, medidas en [E3](eval/results/e3_security.md). Los det
 
 Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o cualquier cliente MCP pueden usarlo y compartir la misma memoria. Todo vive en un único archivo SQLite.
 
-![Una sesión real de la CLI: un hecho cambia, Vigente propone el reemplazo y la búsqueda devuelve lo vigente ahora o en una fecha pasada](demo/vigente.gif)
+![Una sesión real de la CLI: un hecho cambia, Lastword propone el reemplazo y la búsqueda devuelve lo vigente ahora o en una fecha pasada](demo/lastword.gif)
 
-<sub>Sesión real, grabada por [`demo/record.py`](demo/record.py) con el modelo de embeddings en marcha.</sub>
+<sub>Sesión real, grabada por [`demo/record.py`](demo/record.py) con el modelo de embeddings en marcha. Está en inglés; la CLI sigue el idioma del sistema, español o inglés, o `LASTWORD_LANG`.</sub>
 
 ## Resultados
 
 ![Qué es el primer resultado de la búsqueda según el sistema de memoria](eval/results/e1_obsoletos.svg)
 
-| | Memoria ingenua | Vigente |
+| | Memoria ingenua | Lastword |
 |---|---:|---:|
 | El primer resultado es el dato correcto ([datos sintéticos](eval/results/e1_synthetic.md), búsqueda por vectores) | 48% | **95%** |
 | El primer resultado es una versión obsoleta del dato | 51% | **0%** |
@@ -39,7 +39,7 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 - **Reordenar por lo más reciente no basta.** Elimina los obsoletos, pero entonces el primer resultado es otro dato en la mitad de las preguntas (51%).
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 preguntas de un benchmark público: sin reemplazos, la versión vieja de un dato actualizado sale antes que la nueva en el **54–56%** de los casos, con cualquier modo de búsqueda.
 - **[Escala](eval/results/scale.md):** con 200.000 hechos, una búsqueda tarda 25 ms y guardar un hecho 26 ms (7 ms cada una con 50.000). Guardar cuesta lo mismo que buscar porque cada hecho nuevo se compara con los vigentes para proponer reemplazos. La búsqueda compara primero vectores comprimidos a 1 bit y reordena los mejores candidatos con los exactos, con los mismos resultados que una búsqueda exacta en E1 y E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Hay que sumar unos 13 ms del modelo de embeddings.
-- **[Un agente real](eval/results/agent_demo.md)** (Claude Code, cuatro sesiones independientes que solo comparten Vigente) sigue el protocolo por su cuenta: antes de guardar un cambio busca el hecho viejo, o enlaza el reemplazo que le propone `remember`; no duplica hechos y responde con lo vigente.
+- **[Un agente real](eval/results/agent_demo.md)** (Claude Code, cuatro sesiones independientes que solo comparten Lastword) sigue el protocolo por su cuenta: antes de guardar un cambio busca el hecho viejo, o enlaza el reemplazo que le propone `remember`; no duplica hechos y responde con lo vigente.
 - **[Códigos exactos](eval/results/e4_exact.md):** la búsqueda por vectores ya devuelve primero la memoria correcta en 36 de 36 preguntas que dependen de un código (el error E-4031 frente al E-4013, el pedido 7781 frente al 7718); la de texto sola acierta 34. Por eso no se añadió ningún modo especial.
 - **[Seguridad](eval/results/e3_security.md):** los filtros detectan 40 de 40 secretos sin ningún falso aviso en 40 frases parecidas (números de pedido, hashes, «la clave está en 1Password»), y marcan 40 de 40 órdenes incrustadas frente a 1 de 40 memorias legítimas. Los casos y las reglas los escribió la misma persona: es un techo.
 
@@ -47,11 +47,11 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 
 ## Investigación de seguridad: ¿puede una mentira reemplazar a un hecho?
 
-**La pregunta.** Los filtros paran secretos y órdenes. Pero una mentira escrita como una frase normal no es ninguna de las dos cosas. [ShadowMerge](https://arxiv.org/abs/2605.09033) (mayo de 2026) ataca así a las memorias en grafo: en vez de una orden, introduce una relación corriente que contradice a la verdadera. Sus autores miden un 93,8% de éxito medio sobre Mem0 y concluyen que las defensas de entrada representativas no bastan. Vigente no es un grafo y no se ha ejecutado ShadowMerge contra él, pero la idea se traslada.
+**La pregunta.** Los filtros paran secretos y órdenes. Pero una mentira escrita como una frase normal no es ninguna de las dos cosas. [ShadowMerge](https://arxiv.org/abs/2605.09033) (mayo de 2026) ataca así a las memorias en grafo: en vez de una orden, introduce una relación corriente que contradice a la verdadera. Sus autores miden un 93,8% de éxito medio sobre Mem0 y concluyen que las defensas de entrada representativas no bastan. Lastword no es un grafo y no se ha ejecutado ShadowMerge contra él, pero la idea se traslada.
 
 **Qué pasó aquí.** Una persona guarda «el proveedor cobra en la cuenta acabada en 4471». Un agente que leyó un correo falso lo reemplaza por «…acabada en 9902». En la versión 1.3.1, con 12 casos así, se aceptaron las 12 mentiras, ninguna con aviso, y `recall` devolvía solo la mentira. `remember` incluso proponía al agente cerrar el hecho verdadero. La verdad se recuperaba siempre con `history`, pero nadie avisaba de que había que mirarlo.
 
-**La solución.** Cada memoria guarda su origen: una persona, un agente o algo que un agente trajo de fuera. Lo fija la interfaz, no quien escribe: por MCP nadie es nunca una persona. Un origen menos fiable no puede cerrar ni borrar un hecho más fiable. El cambio espera, el hecho verdadero sigue vigente y decide una persona (`vigente pending`, `accept`, `reject`). Medido con la regla fijada [antes de escribir el código](eval/README.md), con 12 pares inventados y 70 de un benchmark público ([script](eval/e5_trust.py), [resultados](eval/results/e5_trust.md)):
+**La solución.** Cada memoria guarda su origen: una persona, un agente o algo que un agente trajo de fuera. Lo fija la interfaz, no quien escribe: por MCP nadie es nunca una persona. Un origen menos fiable no puede cerrar ni borrar un hecho más fiable. El cambio espera, el hecho verdadero sigue vigente y decide una persona (`lastword pending`, `accept`, `reject`). Medido con la regla fijada [antes de escribir el código](eval/README.md), con 12 pares inventados y 70 de un benchmark público ([script](eval/e5_trust.py), [resultados](eval/results/e5_trust.md)):
 
 | Ataque a un hecho que guardó una persona | Hechos cerrados o borrados | La mentira sale sin la verdad (k=5) |
 |---|---:|---:|
@@ -64,7 +64,7 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 
 **Lo que no resuelve:**
 
-- **Un agente puede seguir cambiando lo que guardó otro agente.** Mismo origen, sin protección. `vigente confirm` protege un hecho que una persona da por bueno.
+- **Un agente puede seguir cambiando lo que guardó otro agente.** Mismo origen, sin protección. `lastword confirm` protege un hecho que una persona da por bueno.
 - **Las mentiras guardadas junto a la verdad solo se mitigan.** Salen las dos, la fiable primero. La tabla es con embeddings: pidiendo un solo resultado, 3 de 23 mentiras salieron solas, y sin embeddings, 1 de 66 con cinco resultados. El aviso nombra a las dos en 58 de 69 casos reales (84%): por debajo del 90% fijado antes, si tiene que nombrar a las dos. Leída al pie de la letra, la regla se cumple con 63 de 69.
 - **Cuesta avisos de más.** Las 10 frases legítimas del mismo tema que un hecho de una persona llevaron uno. Sin embeddings, también 2 de 8 sin relación.
 - **Un agente con acceso a la terminal puede usar la CLI,** y ahí cuenta como una persona.
@@ -81,13 +81,14 @@ El diseño, lo que se descartó y por qué, en el [ADR-0011](docs/decisions/0011
 
 ## Novedades desde la 1.0
 
+- **Nombre nuevo (2.0).** El proyecto se llamaba Vigente; lo configurado con ese nombre sigue valiendo ([cómo actualizar](#desarrollo)).
 - **Quién puede cambiar un hecho (1.4).** Un origen menos fiable no puede reemplazar un hecho más fiable: el cambio espera a una persona ([por qué](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
 - **Revisión de seguridad (1.4).** Tres pasadas de revisores automáticos, antes de publicar: dos formas de esquivar esa protección, texto escondido, códigos de terminal y un patrón que bloqueaba el servidor, todo corregido ([CHANGELOG](CHANGELOG.md)).
-- **Seguridad (1.1).** Rechaza los secretos y los caracteres Unicode invisibles al guardar, y marca el texto que suena a orden para el agente. `vigente review` lista lo marcado.
+- **Seguridad (1.1).** Rechaza los secretos y los caracteres Unicode invisibles al guardar, y marca el texto que suena a orden para el agente. `lastword review` lista lo marcado.
 - **Un hecho reemplaza a varios (1.2).** «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos de una vez: `also_old_ids` en MCP, `--also` en la CLI. Desde la 1.3 se puede sumar otro hecho después al mismo reemplazo.
-- **Compartirla entre ordenadores (1.2).** `vigente-mcp --http` sirve la memoria a otros ordenadores, a un equipo o a un agente en la nube, con un token obligatorio. Desde la 1.3, `--allowed-host` la deja en localhost detrás de un proxy HTTPS.
+- **Compartirla entre ordenadores (1.2).** `lastword-mcp --http` sirve la memoria a otros ordenadores, a un equipo o a un agente en la nube, con un token obligatorio. Desde la 1.3, `--allowed-host` la deja en localhost detrás de un proxy HTTPS.
 - **Búsqueda más rápida (1.2).** Búsqueda por vectores en dos pasos: unas 9 veces más rápida que la exacta con 50.000 memorias, con los mismos resultados.
-- **En inglés o en español (1.2).** La CLI y `vigente-mcp` siguen el idioma del sistema o `VIGENTE_LANG`.
+- **En inglés o en español (1.2).** La CLI y `lastword-mcp` siguen el idioma del sistema o `LASTWORD_LANG`.
 - **Auditada (1.3).** Una revisión completa del código corrigió, entre otros, un fallo con las fechas y dos problemas de privacidad ([Seguridad y privacidad](#seguridad-y-privacidad)).
 
 Cada versión, en detalle: [CHANGELOG.md](CHANGELOG.md) (en inglés).
@@ -104,17 +105,17 @@ Cada versión, en detalle: [CHANGELOG.md](CHANGELOG.md) (en inglés).
 ## Probarlo
 
 ```bash
-git clone https://github.com/laulys/vigente && cd vigente
+git clone https://github.com/laulys/lastword && cd lastword
 uv sync
-ollama pull embeddinggemma        # opcional: sin él, Vigente busca solo por texto
-uv run vigente add "El proyecto usa PostgreSQL 15" --valid-from 2026-03-01
-uv run vigente add "Migramos a SQLite para el MVP"   # propone reemplazar el hecho anterior
-uv run vigente supersede <id-viejo> --by <id-nuevo>
-uv run vigente search "¿qué base de datos usamos?"
-uv run vigente search "¿qué base de datos usamos?" --as-of 2026-06-01
+ollama pull embeddinggemma        # opcional: sin él, Lastword busca solo por texto
+uv run lastword add "El proyecto usa PostgreSQL 15" --valid-from 2026-03-01
+uv run lastword add "Migramos a SQLite para el MVP"   # propone reemplazar el hecho anterior
+uv run lastword supersede <id-viejo> --by <id-nuevo>
+uv run lastword search "¿qué base de datos usamos?"
+uv run lastword search "¿qué base de datos usamos?" --as-of 2026-06-01
 ```
 
-Todos los comandos de la CLI (`vigente --help` muestra sus opciones):
+Todos los comandos de la CLI (`lastword --help` muestra sus opciones):
 
 | Comando | Qué hace |
 |---|---|
@@ -136,13 +137,13 @@ Todos los comandos de la CLI (`vigente --help` muestra sus opciones):
 **Claude Code:**
 
 ```bash
-claude mcp add vigente -e VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /ruta/a/vigente run vigente-mcp
+claude mcp add lastword -e LASTWORD_WORKSPACE=mi-proyecto -- uv --directory /ruta/a/lastword run lastword-mcp
 ```
 
 **Codex:**
 
 ```bash
-codex mcp add vigente --env VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /ruta/a/vigente run vigente-mcp
+codex mcp add lastword --env LASTWORD_WORKSPACE=mi-proyecto -- uv --directory /ruta/a/lastword run lastword-mcp
 ```
 
 **Cursor** (`.cursor/mcp.json`) o **Claude Desktop** (`claude_desktop_config.json`):
@@ -150,10 +151,10 @@ codex mcp add vigente --env VIGENTE_WORKSPACE=mi-proyecto -- uv --directory /rut
 ```json
 {
   "mcpServers": {
-    "vigente": {
+    "lastword": {
       "command": "uv",
-      "args": ["--directory", "/ruta/a/vigente", "run", "vigente-mcp"],
-      "env": { "VIGENTE_WORKSPACE": "mi-proyecto" }
+      "args": ["--directory", "/ruta/a/lastword", "run", "lastword-mcp"],
+      "env": { "LASTWORD_WORKSPACE": "mi-proyecto" }
     }
   }
 }
@@ -172,11 +173,11 @@ El workspace lo fija la configuración del servidor, así que un agente no puede
 
 ### Compartirla entre ordenadores
 
-`vigente-mcp --http` sirve la misma memoria por HTTP, para que la compartan otros ordenadores, un equipo o un agente en la nube. Exige un token ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
+`lastword-mcp --http` sirve la misma memoria por HTTP, para que la compartan otros ordenadores, un equipo o un agente en la nube. Exige un token ([ADR-0009](docs/decisions/0009-compartir-por-http.md)):
 
 ```bash
-export VIGENTE_TOKEN=$(openssl rand -hex 32)
-VIGENTE_WORKSPACE=equipo uv run vigente-mcp --http --allowed-host memoria.example.com
+export LASTWORD_TOKEN=$(openssl rand -hex 32)
+LASTWORD_WORKSPACE=equipo uv run lastword-mcp --http --allowed-host memoria.example.com
 ```
 
 Solo escucha en `127.0.0.1:8765`. Pon delante, en el mismo ordenador, un proxy HTTPS (Caddy, nginx o un túnel) e indica su nombre público con `--allowed-host`: sin eso, el servidor responde 421 a las peticiones que llegan con ese nombre. `--host 0.0.0.0` deja el puerto sin cifrar abierto a toda la red: úsalo solo en una red de confianza.
@@ -184,18 +185,18 @@ Solo escucha en `127.0.0.1:8765`. Pon delante, en el mismo ordenador, un proxy H
 Claude Code:
 
 ```bash
-claude mcp add --transport http vigente https://memoria.example.com/mcp --header "Authorization: Bearer $VIGENTE_TOKEN"
+claude mcp add --transport http lastword https://memoria.example.com/mcp --header "Authorization: Bearer $LASTWORD_TOKEN"
 ```
 
 Codex (`~/.codex/config.toml`):
 
 ```toml
-[mcp_servers.vigente]
+[mcp_servers.lastword]
 url = "https://memoria.example.com/mcp"
-bearer_token_env_var = "VIGENTE_TOKEN"
+bearer_token_env_var = "LASTWORD_TOKEN"
 ```
 
-> **Si tu cliente tiene memoria propia**, el agente puede guardar lo mismo en los dos sitios, y solo Vigente sabrá cuándo deja de ser verdad. En Claude Code puedes desactivar su memoria automática con `"autoMemoryEnabled": false` en la configuración del proyecto, o con `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ([documentación](https://code.claude.com/docs/en/memory)).
+> **Si tu cliente tiene memoria propia**, el agente puede guardar lo mismo en los dos sitios, y solo Lastword sabrá cuándo deja de ser verdad. En Claude Code puedes desactivar su memoria automática con `"autoMemoryEnabled": false` en la configuración del proyecto, o con `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ([documentación](https://code.claude.com/docs/en/memory)).
 
 ## Seguridad y privacidad
 
@@ -207,35 +208,35 @@ Una memoria que comparten varios agentes, y que dura entre sesiones, tiene que c
 - entre personas, por HTTP, porque lo que guarda otro acaba en tus sesiones;
 - con agentes que leen contenido de fuera, como correos, issues o páginas web, o con agentes hechos a medida que tienen menos protecciones propias.
 
-Con un solo cliente, en tu propio ordenador, aportan menos: entonces la razón principal para usar Vigente es la otra mitad, saber qué sigue siendo verdad.
+Con un solo cliente, en tu propio ordenador, aportan menos: entonces la razón principal para usar Lastword es la otra mitad, saber qué sigue siendo verdad.
 
-Qué hace Vigente:
+Qué hace Lastword:
 
-- **Por defecto, nada sale de tu ordenador.** La memoria es un archivo SQLite local, y los embeddings los calcula un modelo local. Enviar memorias a un servicio de embeddings no local exige `VIGENTE_ALLOW_REMOTE=1`, y con direcciones locales se ignoran los proxies del sistema. En un ordenador con varios usuarios y sin Ollama en marcha, otro podría escuchar en su puerto: ahí, desactiva los embeddings con `VIGENTE_EMBED_MODEL=none`.
+- **Por defecto, nada sale de tu ordenador.** La memoria es un archivo SQLite local, y los embeddings los calcula un modelo local. Enviar memorias a un servicio de embeddings no local exige `LASTWORD_ALLOW_REMOTE=1`, y con direcciones locales se ignoran los proxies del sistema. En un ordenador con varios usuarios y sin Ollama en marcha, otro podría escuchar en su puerto: ahí, desactiva los embeddings con `LASTWORD_EMBED_MODEL=none`.
 - **El archivo es privado.** Se crea legible solo para su dueño (carpeta `0700`, archivo `0600`). No está cifrado: lo protege el cifrado del disco, como FileVault o BitLocker.
 - **Los secretos no se guardan.** Se rechazan al guardar las claves de API de 10 formatos conocidos, las contraseñas escritas en una frase o como variable de entorno, y los tokens con aspecto aleatorio. El error no repite el secreto y propone guardar dónde está. Solo una persona puede saltárselo, desde la CLI con `--allow-secret`; los clientes MCP no pueden.
-- **Las memorias son datos, nunca órdenes.** Se rechazan los caracteres Unicode invisibles que pueden esconder texto. El texto que suena a orden para el agente se guarda marcado: `recall` avisa al agente y `vigente review` lo lista. El servidor le dice al agente que nunca siga una memoria. Son reglas en español e inglés: cazan lo evidente, no a un atacante que las conozca, así que [E3](eval/results/e3_security.md) es un techo.
+- **Las memorias son datos, nunca órdenes.** Se rechazan los caracteres Unicode invisibles que pueden esconder texto. El texto que suena a orden para el agente se guarda marcado: `recall` avisa al agente y `lastword review` lo lista. El servidor le dice al agente que nunca siga una memoria. Son reglas en español e inglés: cazan lo evidente, no a un atacante que las conozca, así que [E3](eval/results/e3_security.md) es un techo.
 - **Lo que enseña la CLI es lo que hay guardado.** Se rechazan los códigos que mueven el cursor o esconden texto en el terminal, y si una memoria antigua los tiene, salen sustituidos.
 - **Olvidar borra.** `forget` elimina todas las versiones de las filas, del índice de texto y de las dos tablas de vectores, y SQLite sobrescribe el espacio liberado. Si en ese momento otra conexión está leyendo, el texto sigue en los archivos de la base hasta que se cierre, y `forget` lo avisa.
 - **Un agente, un workspace.** El servidor fija el workspace; ninguna herramienta acepta otro.
 - **Por HTTP, el token es obligatorio.** De al menos 32 caracteres, comparado en tiempo constante. El servidor se queda en `127.0.0.1` detrás de un proxy HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)).
-- **Auditado dos veces.** Una revisión completa del código corrigió en la v1.3, entre otros, dos problemas de privacidad: el texto de las memorias podía llegar a un proxy del sistema, y otros usuarios del ordenador podían leer el archivo ([pull request](https://github.com/laulys/vigente/pull/9)). Otra, de seguridad, corrigió después un texto que bloqueaba el servidor, códigos de terminal y varios filtros ([CHANGELOG](CHANGELOG.md)).
+- **Auditado dos veces.** Una revisión completa del código corrigió en la v1.3, entre otros, dos problemas de privacidad: el texto de las memorias podía llegar a un proxy del sistema, y otros usuarios del ordenador podían leer el archivo ([pull request](https://github.com/laulys/lastword/pull/9)). Otra, de seguridad, corrigió después un texto que bloqueaba el servidor, códigos de terminal y varios filtros ([CHANGELOG](CHANGELOG.md)).
 
 ## Configuración
 
 | Variable | Por defecto | Para qué |
 |---|---|---|
-| `VIGENTE_DB` | `~/.vigente/vigente.db` | Archivo de la memoria |
-| `VIGENTE_WORKSPACE` | `default` | Espacio aislado de memorias |
-| `VIGENTE_EMBED_MODEL` | `embeddinggemma` | Modelo de embeddings; `none` para buscar solo por texto |
-| `VIGENTE_EMBED_BASE_URL` | `http://127.0.0.1:11434/v1` | Cualquier servicio con la API de OpenAI |
-| `VIGENTE_EMBED_API_KEY` | | Solo si el servicio la pide |
-| `VIGENTE_ALLOW_REMOTE` | desactivado | Necesario para enviar memorias a un servicio no local |
-| `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectores + texto) o `text` |
-| `VIGENTE_TOKEN` | | Necesario con `vigente-mcp --http`: los clientes lo envían como *bearer token* |
-| `VIGENTE_LANG` | idioma del sistema | `es` o `en`: idioma de lo que lee una persona en `vigente` y `vigente-mcp` |
+| `LASTWORD_DB` | `~/.lastword/lastword.db` | Archivo de la memoria |
+| `LASTWORD_WORKSPACE` | `default` | Espacio aislado de memorias |
+| `LASTWORD_EMBED_MODEL` | `embeddinggemma` | Modelo de embeddings; `none` para buscar solo por texto |
+| `LASTWORD_EMBED_BASE_URL` | `http://127.0.0.1:11434/v1` | Cualquier servicio con la API de OpenAI |
+| `LASTWORD_EMBED_API_KEY` | | Solo si el servicio la pide |
+| `LASTWORD_ALLOW_REMOTE` | desactivado | Necesario para enviar memorias a un servicio no local |
+| `LASTWORD_SEARCH_MODE` | `vector` | `hybrid` (vectores + texto) o `text` |
+| `LASTWORD_TOKEN` | | Necesario con `lastword-mcp --http`: los clientes lo envían como *bearer token* |
+| `LASTWORD_LANG` | idioma del sistema | `es` o `en`: idioma de lo que lee una persona en `lastword` y `lastword-mcp` |
 
-Si el servicio de embeddings no responde, Vigente sigue funcionando con búsqueda de texto y lo avisa. `vigente reindex` calcula después los vectores pendientes.
+Si el servicio de embeddings no responde, Lastword sigue funcionando con búsqueda de texto y lo avisa. `lastword reindex` calcula después los vectores pendientes.
 
 ## Decisiones de diseño
 
@@ -259,14 +260,16 @@ El diseño completo está en [docs/architecture.md](docs/architecture.md).
 
 ```bash
 uv run pytest                                              # sin red ni modelos
-VIGENTE_TEST_OLLAMA=1 uv run pytest tests/test_ollama.py   # con Ollama local
+LASTWORD_TEST_OLLAMA=1 uv run pytest tests/test_ollama.py   # con Ollama local
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests eval demo
 ```
 
+Hasta la 1.4, el proyecto se llamaba Vigente. Lo configurado con ese nombre sigue valiendo: los comandos `vigente` y `vigente-mcp`, las variables `VIGENTE_*` y la memoria de `~/.vigente`. Para actualizar, ejecuta `uv tool uninstall vigente` antes de instalar.
+
 Cómo repetir toda la evaluación: [eval/README.md](eval/README.md).
 
-El proyecto se construyó por hitos (diseño, núcleo, búsqueda semántica, servidor MCP, evaluación y seguridad), cada uno con sus decisiones en un ADR. Desde el servidor MCP, cada cambio entró por un [pull request](https://github.com/laulys/vigente/pulls?q=is%3Apr) con sus decisiones y mediciones.
+El proyecto se construyó por hitos (diseño, núcleo, búsqueda semántica, servidor MCP, evaluación y seguridad), cada uno con sus decisiones en un ADR. Desde el servidor MCP, cada cambio entró por un [pull request](https://github.com/laulys/lastword/pulls?q=is%3Apr) con sus decisiones y mediciones.
 
 ## Licencia
 

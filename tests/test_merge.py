@@ -7,11 +7,11 @@ import sqlite3
 import pytest
 from pydantic import ValidationError
 
+from lastword import store
+from lastword.errors import AlreadySupersededError, NotSupersedableError
+from lastword.models import Memory, SupersedeRequest
+from lastword.service import MemoryService
 from tests.helpers import FakeClock, recall_ids, remember, supersede
-from vigente import store
-from vigente.errors import AlreadySupersededError, NotSupersedableError
-from vigente.models import Memory, SupersedeRequest
-from vigente.service import MemoryService
 
 
 @pytest.fixture

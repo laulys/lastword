@@ -2,13 +2,13 @@
 
 Generado por `eval/e1_synthetic.py`. Protocolo y reglas, fijadas antes de ejecutar, en [`eval/README.md`](../README.md).
 
-- Fecha: 2026-11-18
+- Fecha: 2026-11-25
 - Embeddings: `embeddinggemma`
 - Datos: 72 atributos, 174 versiones (102 cambios), 54 episodios de distracción, 129 preguntas (72 sobre el presente, 57 con fecha).
 
 ## Resultado
 
-**La tesis se sostiene.** Con la búsqueda híbrida (el modo por defecto cuando se fijó el protocolo), el primer resultado es una versión obsoleta del dato en el 44% de las preguntas con la memoria ingenua y en el 0% con Vigente. Recall@5: 88% frente a 100%.
+**La tesis se sostiene.** Con la búsqueda híbrida (el modo por defecto cuando se fijó el protocolo), el primer resultado es una versión obsoleta del dato en el 44% de las preguntas con la memoria ingenua y en el 0% con Lastword. Recall@5: 88% frente a 100%.
 
 Con la búsqueda por vectores, que pasa a ser la de por defecto tras este hito ([decisiones](decisions.md)): 51% frente a 0% de obsoletas, y Recall@5 de 97% frente a 100%.
 
@@ -24,8 +24,8 @@ Con la búsqueda por vectores, que pasa a ser la de por defecto tras este hito (
 | ingenua | con fecha (57) | 61% | 100% | 0.77 | 26% | 32% | 12% |
 | ingenua + recencia | presente (72) | 50% | 79% | 0.64 | 8% | 76% | 42% |
 | ingenua + recencia | con fecha (57) | 47% | 100% | 0.66 | 0% | 32% | 53% |
-| vigente | presente (72) | 75% | 100% | 0.86 | 0% | 0% | 25% |
-| vigente | con fecha (57) | 84% | 100% | 0.92 | 0% | 0% | 16% |
+| lastword | presente (72) | 75% | 100% | 0.86 | 0% | 0% | 25% |
+| lastword | con fecha (57) | 84% | 100% | 0.92 | 0% | 0% | 16% |
 
 ## Modos de búsqueda (todas las preguntas)
 
@@ -36,11 +36,11 @@ Con la búsqueda por vectores, que pasa a ser la de por defecto tras este hito (
 | ingenua | híbrida | 41% | 88% | 0.60 | 44% |
 | ingenua | híbrida ponderada | 47% | 95% | 0.66 | 47% |
 | ingenua | automática | 48% | 97% | 0.69 | 51% |
-| vigente | texto | 47% | 91% | 0.63 | 0% |
-| vigente | vector | 95% | 100% | 0.97 | 0% |
-| vigente | híbrida | 79% | 100% | 0.88 | 0% |
-| vigente | híbrida ponderada | 91% | 100% | 0.95 | 0% |
-| vigente | automática | 95% | 100% | 0.97 | 0% |
+| lastword | texto | 47% | 91% | 0.63 | 0% |
+| lastword | vector | 95% | 100% | 0.97 | 0% |
+| lastword | híbrida | 79% | 100% | 0.88 | 0% |
+| lastword | híbrida ponderada | 91% | 100% | 0.95 | 0% |
+| lastword | automática | 95% | 100% | 0.97 | 0% |
 
 ## Umbral de posibles reemplazos
 

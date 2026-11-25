@@ -1,4 +1,4 @@
-"""CLI de Vigente: administración, depuración y demo."""
+"""CLI de Lastword: administración, depuración y demo."""
 
 from __future__ import annotations
 
@@ -20,18 +20,18 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from vigente import safety, store
-from vigente.config import (
-    DEFAULT_DB_PATH,
+from lastword import environment, safety, store
+from lastword.config import (
     DEFAULT_EMBED_MODEL,
     DEFAULT_WORKSPACE,
     EmbeddingSettings,
     parse_search_mode,
 )
-from vigente.embeddings import DEFAULT_BASE_URL
-from vigente.errors import SecretDetectedError, VigenteError
-from vigente.i18n import tr
-from vigente.models import (
+from lastword.embeddings import DEFAULT_BASE_URL
+from lastword.environment import DEFAULT_DB_PATH
+from lastword.errors import LastwordError, SecretDetectedError
+from lastword.i18n import tr
+from lastword.models import (
     Hit,
     Kind,
     ListQuery,
@@ -49,10 +49,10 @@ from vigente.models import (
     SupersedeResult,
     describe_validation_error,
 )
-from vigente.service import MemoryService
+from lastword.service import MemoryService
 
 app = typer.Typer(
-    help=tr("Vigente: memoria para agentes de IA que sabe qué sigue siendo verdad."),
+    help=tr("Lastword: memoria para agentes de IA que sabe qué sigue siendo verdad."),
     no_args_is_help=True,
     add_completion=False,
 )
@@ -84,12 +84,18 @@ class Options:
 def main(
     ctx: typer.Context,
     db: Annotated[
-        Path, typer.Option("--db", envvar="VIGENTE_DB", help=tr("Archivo SQLite de la memoria."))
+        Path,
+        typer.Option(
+            "--db", envvar=environment.names("DB"), help=tr("Archivo SQLite de la memoria.")
+        ),
     ] = DEFAULT_DB_PATH,
     workspace: Annotated[
         str,
         typer.Option(
-            "--workspace", "-w", envvar="VIGENTE_WORKSPACE", help=tr("Espacio de memoria aislado.")
+            "--workspace",
+            "-w",
+            envvar=environment.names("WORKSPACE"),
+            help=tr("Espacio de memoria aislado."),
         ),
     ] = DEFAULT_WORKSPACE,
     as_json: Annotated[bool, typer.Option("--json", help=tr("Salida en JSON."))] = False,
@@ -97,7 +103,7 @@ def main(
         str,
         typer.Option(
             "--embed-model",
-            envvar="VIGENTE_EMBED_MODEL",
+            envvar=environment.names("EMBED_MODEL"),
             help=tr(
                 "Modelo de embeddings (Ollama u otro servicio compatible con OpenAI). "
                 "'none' desactiva la búsqueda semántica."
@@ -108,9 +114,9 @@ def main(
         str,
         typer.Option(
             "--embed-url",
-            envvar="VIGENTE_EMBED_BASE_URL",
+            envvar=environment.names("EMBED_BASE_URL"),
             help=tr(
-                "URL del servicio de embeddings. Si no es local, exige VIGENTE_ALLOW_REMOTE=1."
+                "URL del servicio de embeddings. Si no es local, exige LASTWORD_ALLOW_REMOTE=1."
             ),
         ),
     ] = DEFAULT_BASE_URL,
@@ -118,7 +124,7 @@ def main(
         str,
         typer.Option(
             "--search-mode",
-            envvar="VIGENTE_SEARCH_MODE",
+            envvar=environment.names("SEARCH_MODE"),
             help=tr("vector (por defecto), hybrid (vector + texto) o text."),
         ),
     ] = SearchMode.VECTOR.value,
@@ -126,7 +132,7 @@ def main(
     # La clave de API y el permiso de envío remoto solo se leen del entorno, nunca de
     # argumentos: no deben quedar en el historial de la shell.
     ctx.obj = Options(
-        db=db.expanduser(),
+        db=environment.default_db_path() if db == DEFAULT_DB_PATH else db.expanduser(),
         workspace=workspace,
         as_json=as_json,
         embedding=EmbeddingSettings.from_env(model=embed_model, base_url=embed_url),
@@ -195,7 +201,7 @@ def _service(ctx: typer.Context) -> Iterator[MemoryService]:
             origin=Origin.PERSON,  # quien usa la CLI es una persona (ADR-0011)
         )
         yield service
-    except VigenteError as exc:
+    except LastwordError as exc:
         message = exc.message
         if isinstance(exc, SecretDetectedError):
             message += tr(" Si de verdad quieres guardarlo, repite el comando con --allow-secret.")
@@ -259,7 +265,7 @@ def _state(memory: Memory) -> str:
 
 
 def _content(memory: Memory) -> Text:
-    """El contenido, con un ⚠ si está marcado (ADR-0007): `vigente review` explica por qué."""
+    """El contenido, con un ⚠ si está marcado (ADR-0007): `lastword review` explica por qué."""
     return _shown(memory.content, flagged=bool(memory.flags))
 
 
@@ -322,7 +328,7 @@ def _render_remember(result: RememberResult) -> None:
         out.print(
             tr(
                 "\nPosibles reemplazos. Si lo que acabas de guardar deja obsoleto alguno, usa "
-                "[bold]vigente supersede <id> --by {id}[/]:",
+                "[bold]lastword supersede <id> --by {id}[/]:",
                 id=memory.id,
             )
         )
@@ -597,7 +603,7 @@ def review(ctx: typer.Context) -> None:
                 table.add_row(memory.id, _shown(memory.content), _shown(reasons))
             out.print(table)
             out.print(
-                tr("Si alguna no debería estar en la memoria, bórrala con vigente forget <id>.")
+                tr("Si alguna no debería estar en la memoria, bórrala con lastword forget <id>.")
             )
 
         data = [
@@ -674,7 +680,7 @@ def pending(ctx: typer.Context) -> None:
                 out.print(tr("[green]Ningún cambio pendiente.[/]"))
                 return
             _render_pending(service, changes)
-            out.print(tr("Decide con vigente accept <id> o vigente reject <id>."))
+            out.print(tr("Decide con lastword accept <id> o lastword reject <id>."))
 
         _emit(ctx, [change.model_dump(mode="json") for change in changes], render)
 
@@ -704,7 +710,7 @@ def reject(
                 out.print(
                     tr(
                         "La memoria que se pedía usar sigue guardada: bórrala con "
-                        "vigente forget {id} si no es cierta.",
+                        "lastword forget {id} si no es cierta.",
                         id=result.kept_id,
                     )
                 )

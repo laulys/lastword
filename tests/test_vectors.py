@@ -9,12 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.fakes import DATABASE_WORDS, FailingEmbedder, FakeEmbedder, FixedEmbedder
-from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
-from vigente import store
-from vigente.embeddings import Purpose
-from vigente.errors import ConfigError, NotSupersedableError
-from vigente.models import (
+from lastword import store
+from lastword.embeddings import Purpose
+from lastword.errors import ConfigError, NotSupersedableError
+from lastword.models import (
     Hit,
     Kind,
     Memory,
@@ -23,8 +21,10 @@ from vigente.models import (
     SearchMode,
     SupersedeRequest,
 )
-from vigente.retrieval import hybrid, reciprocal_rank_fusion
-from vigente.service import MemoryService
+from lastword.retrieval import hybrid, reciprocal_rank_fusion
+from lastword.service import MemoryService
+from tests.fakes import DATABASE_WORDS, FailingEmbedder, FakeEmbedder, FixedEmbedder
+from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
 
 
 @pytest.fixture
@@ -406,7 +406,7 @@ class TestSeveralModels:
         semantic = MemoryService(conn, "test", clock=clock, embedder=embedder)
         result = semantic.remember(NewMemory(content="El proyecto usa PostgreSQL 16"))
         assert [hit.memory.id for hit in result.possible_supersedes] == [old.id]
-        assert any("vigente reindex" in warning for warning in result.warnings)
+        assert any("lastword reindex" in warning for warning in result.warnings)
 
     def test_going_back_to_a_previous_model_keeps_vector_search(
         self, conn: sqlite3.Connection, clock: FakeClock

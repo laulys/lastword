@@ -1,7 +1,7 @@
 """E5: ¿quién puede cambiar lo que es verdad? Mide la protección del ADR-0011.
 
 Parte de ShadowMerge (arXiv:2605.09033), un ataque a memorias en grafo: no mete una orden, sino
-una relación normal que contradice a la verdadera. Vigente no es un grafo, así que no se ejecuta
+una relación normal que contradice a la verdadera. Lastword no es un grafo, así que no se ejecuta
 ShadowMerge: se prueba la misma idea por cinco vías. Datos, vías y regla, en eval/README.md.
 
 Uso:
@@ -20,12 +20,12 @@ from pathlib import Path
 from cache import CachedEmbedder
 from longmemeval import load
 
-from vigente import store
-from vigente.config import EmbeddingSettings
-from vigente.embeddings import Embedder
-from vigente.errors import PendingConfirmationError, ProtectedError
-from vigente.models import Memory, NewMemory, Origin, RecallQuery, SupersedeRequest
-from vigente.service import MemoryService
+from lastword import store
+from lastword.config import EmbeddingSettings
+from lastword.embeddings import Embedder
+from lastword.errors import PendingConfirmationError, ProtectedError
+from lastword.models import Memory, NewMemory, Origin, RecallQuery, SupersedeRequest
+from lastword.service import MemoryService
 
 HERE = Path(__file__).parent
 RESULTS_MD = HERE / "results" / "e5_trust.md"
@@ -265,7 +265,7 @@ def extra_warnings(embedder: Embedder | None) -> dict[str, tuple[int, int]]:
 def main() -> None:
     inner = EmbeddingSettings.from_env().build()
     if inner is None:
-        raise SystemExit("Hace falta un modelo de embeddings (VIGENTE_EMBED_MODEL).")
+        raise SystemExit("Hace falta un modelo de embeddings (LASTWORD_EMBED_MODEL).")
     cached = CachedEmbedder(inner)
     datasets = {
         "inventados": [Pair(*case) for case in INVENTED],
@@ -328,7 +328,7 @@ def main() -> None:
     lines += [
         "",
         "Es el límite conocido: el mismo origen no protege. Una persona puede confirmar un hecho "
-        "con `vigente confirm`, y entonces pasa a las tablas de arriba. Al reenlazar, el último "
+        "con `lastword confirm`, y entonces pasa a las tablas de arriba. Al reenlazar, el último "
         "hecho de cada conjunto no tiene otro con el que enlazarse.",
         "",
         "## Avisos de más",

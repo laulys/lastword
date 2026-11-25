@@ -11,10 +11,10 @@ from typing import Any
 import pytest
 import sqlite_vec
 
+from lastword import store
+from lastword.errors import SchemaVersionError
+from lastword.models import Kind, Memory
 from tests.helpers import T0
-from vigente import store
-from vigente.errors import SchemaVersionError
-from vigente.models import Kind, Memory
 
 
 def test_connect_creates_schema_and_safety_pragmas(conn: sqlite3.Connection) -> None:
@@ -190,7 +190,7 @@ def test_text_search_scans_the_fts_index_first(conn: sqlite3.Connection) -> None
 @pytest.mark.skipif(os.name != "posix", reason="permisos POSIX")
 def test_a_new_database_is_private_to_its_owner(tmp_path: Path) -> None:
     """La memoria puede contener datos personales: otros usuarios del ordenador no la leen."""
-    path = tmp_path / "nueva" / "vigente.db"
+    path = tmp_path / "nueva" / "lastword.db"
     conn = store.connect(path)
     conn.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
     conn.close()
