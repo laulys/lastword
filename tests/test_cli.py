@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner, Result
 
 from vigente import store
-from vigente.cli import app
+from vigente.cli import _json, app
 
 runner = CliRunner()
 
@@ -219,7 +219,9 @@ class TestClearErrors:
         error = json.loads(result.stderr)
         assert (error["code"], "ocupada" in error["message"]) == ("database", True)
 
-    @pytest.mark.parametrize("date", ["2024", "9999-12-31T23:59:59.999Z", "0001-01-01T00:00+05:00"])
+    @pytest.mark.parametrize(
+        "date", ["2024", ".5", "1.7e9", "9999-12-31T23:59:59.999Z", "0001-01-01T00:00+05:00"]
+    )
     def test_a_date_that_is_not_a_date(self, db_path: Path, date: str) -> None:
         result = run(db_path, "add", "Ana vive en Madrid", "--valid-from", date)
         assert result.exit_code == 2
@@ -238,3 +240,14 @@ class TestClearErrors:
         missing = run(db_path, "forget", "01J0000000000000000000000Z", as_json=False, input="y\n")
         assert missing.exit_code == 1
         assert "Borrar" not in missing.stdout
+
+
+def test_forget_shows_every_version_before_asking(db_path: Path) -> None:
+    first = ok(run(db_path, "add", "El proyecto usa SQLite"))["memory"]["id"]
+    ok(run(db_path, "supersede", first, "El proyecto usa PostgreSQL"))
+    asked = run(db_path, "forget", first, input="n\n", as_json=False)
+    assert "SQLite" in asked.stdout and "PostgreSQL" in asked.stdout
+
+
+def test_json_escapes_what_a_terminal_would_obey() -> None:
+    assert _json({"a": "x\x9by\x1bz"}) == '{"a": "x\\u009by\\u001bz"}'

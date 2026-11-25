@@ -45,8 +45,44 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 
 The decision rules were fixed **before** measuring ([protocol](eval/README.md)), and E1 and E2 give identical results when re-run.
 
+## Security research: can a lie replace a fact?
+
+**The question.** Filters stop secrets and orders. But a lie written as a plain sentence is neither. [ShadowMerge](https://arxiv.org/abs/2605.09033) (May 2026) attacks graph memories this way: instead of an order, it plants an ordinary relation that contradicts the true one. Its authors report a 93.8% average success rate on Mem0, and find that representative input-side defenses are not enough. Vigente is not a graph, and ShadowMerge itself was not run against it, but the idea carries over.
+
+**What happened here.** A person saves «the supplier is paid on the account ending in 4471». An agent that read a forged email supersedes it with «…ending in 9902». In version 1.3.1, over 12 cases like this, all 12 lies were accepted, none with a warning, and `recall` returned only the lie. `remember` even suggested that the agent close the true fact. The truth could always be recovered from `history`, but nobody was told to look.
+
+**The fix.** Each memory keeps its origin: a person, an agent, or something an agent brought from outside. The interface sets it, not whoever writes: over MCP nobody is ever a person. A less trusted origin cannot close or delete a more trusted fact. The change waits, the true fact stays current, and a person decides (`vigente pending`, `accept`, `reject`). Measured with the rule fixed [before writing the code](eval/README.md), on 12 invented pairs and 70 from a public benchmark ([script](eval/e5_trust.py), [results](eval/results/e5_trust.md)):
+
+| Attack on a fact saved by a person | Facts closed or deleted | Lie returned without the truth (k=5) |
+|---|---:|---:|
+| `supersede`, with text or with a stored memory | **0 of 82** | 0 |
+| Linking two of the person's own facts | **0 of 82** | 0 |
+| `forget`, then save the lie | **0 of 82** | 0 |
+| `remember` the lie next to the truth | does not apply | 0 |
+
+**Reviewed before release.** E5 passed, and still a security review found two ways to make the protection useless and several smaller ones: for example, changing the text while the person decides. They are fixed, with one test per attack, and told in [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md#vías-que-encontró-una-revisión-antes-de-publicar) (in Spanish). Measuring five routes well does not prove there is no sixth.
+
+**What it does not solve:**
+
+- **An agent can still change what another agent saved.** Same origin, no protection. `vigente confirm` protects a fact a person vouches for.
+- **Lies saved next to the truth are only mitigated.** Both are returned, the trusted one first. The table is with embeddings: asking for a single result, 3 of 23 lies came alone, and without embeddings, 1 of 66 with five results. The warning names both in 58 of 69 real cases (84%): below the 90% set beforehand, if it must name both. Read literally, the rule is met with 63 of 69.
+- **It costs extra warnings.** All 10 legitimate statements on the same topic as a person's fact got one. Without embeddings, so did 2 of 8 unrelated ones.
+- **An agent with access to the terminal can use the CLI,** and there it counts as a person.
+
+**How others handle it**, read in their code on 25 November 2026, without running it:
+
+| Project | Validity dates | Does trust decide what replaces what? |
+|---|---|---|
+| [Graphiti](https://github.com/getzep/graphiti/blob/38eef1eb9f9e993effc9801d64cb73aaf9d3cbbd/graphiti_core/utils/maintenance/edge_operations.py#L795) | Yes | No: the later date wins |
+| [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard/blob/2628cfdb91731ab80caf7fcb0adbe293645ce6e3/src/agent_memory_guard/policies/access.py#L58) | Not found | Partly: rules on who may write what; quarantine and rollback |
+| [ShieldCortex](https://github.com/Drakon-Systems-Ltd/ShieldCortex/blob/128a0734883f33309c9ebfe171c9511fcfb9f6b8/src/threat-graph/conflict.ts#L36) | Partly, in its graph | Partly: trust flags conflicts in four relation types, and a person decides |
+
+The design, what was discarded and why: [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) (in Spanish).
+
 ## What's new since 1.0
 
+- **Who may change a fact (1.4).** A less trusted origin cannot replace a more trusted fact: the change waits for a person ([why](#security-research-can-a-lie-replace-a-fact)).
+- **Security review (1.4).** Three rounds of automated reviewers, before release: two ways around that protection, hidden text, terminal codes and a pattern that blocked the server, all fixed ([CHANGELOG](CHANGELOG.md)).
 - **Security (1.1).** Secrets are rejected on save, hidden Unicode is rejected, and text that reads like an order to the agent is flagged. `vigente review` lists what is flagged.
 - **One fact replaces several (1.2).** «Ana and Luis moved to Lisbon» closes both their old cities in one step: `also_old_ids` in MCP, `--also` in the CLI. Since 1.3, another fact can be added later to the same replacement.
 - **Share it between computers (1.2).** `vigente-mcp --http` serves the memory to other machines, a team or a cloud agent, with a required token. Since 1.3, `--allowed-host` keeps it on localhost behind an HTTPS proxy.
@@ -63,7 +99,7 @@ Every version, in detail: [CHANGELOG.md](CHANGELOG.md).
 - **The engine calls no LLM.** `remember` uses local embeddings (embeddinggemma via Ollama) to propose facts the new one may replace. The agent, which already is an LLM, decides. Proposals favour not missing a replacement (17 of 18 in the hand-written set), so statements on the same topic also get one; similarity cannot tell «this updates that» from «this adds detail», and [masking names and numbers did not help](docs/decisions/0004-modelo-de-embeddings.md).
 - **Forgetting is real.** `forget` deletes every version of a fact from the rows, both indexes and the disk. A test checks that the bytes are gone from the file.
 - **It degrades gracefully.** Without embeddings it searches by text. It refuses to send memories to a non-local service unless you allow it.
-- **It is safe to share between agents.** Secrets are rejected on save, and memories that read like orders are flagged ([Security and privacy](#security-and-privacy)).
+- **It is made to be shared between agents.** Secrets are rejected on save, and memories that read like orders are flagged ([Security and privacy](#security-and-privacy)). A false fact is neither, so a less trusted origin cannot replace a more trusted fact ([what that covers and what it does not](#security-research-can-a-lie-replace-a-fact)).
 
 ## Quick start
 
@@ -89,6 +125,8 @@ All CLI commands (`vigente --help` for their options):
 | `list` | Lists memories, newest first, with filters |
 | `forget` | Deletes a fact and all its versions for good |
 | `review` | Lists flagged memories: possible orders to the agent, hidden characters or secrets |
+| `confirm` | Vouches for a fact an agent saved: only a person can change it |
+| `pending`, `accept`, `reject` | Changes waiting for a person to decide |
 | `reindex` | Computes the vectors that are missing |
 | `doctor`, `stats` | Checks the database and its indexes; counts memories |
 | `init` | Creates the database and the workspace |
@@ -125,10 +163,10 @@ codex mcp add vigente --env VIGENTE_WORKSPACE=my-project -- uv --directory /path
 |---|---|
 | `remember` | Saves a fact or an episode and proposes current facts it may replace. Rejects secrets |
 | `recall` | Searches what is true now, or at a past date (`as_of`) |
-| `supersede` | Closes one or more outdated facts and links their new version (new text, or the id `remember` just returned) |
+| `supersede` | Closes one or more outdated facts and links their new version (new text, or the id `remember` just returned). On a person's fact, the change waits |
 | `history` | All versions of a fact |
 | `list_memories` | Lists memories with filters |
-| `forget` | Deletes a fact and all its versions, also from disk (marked as destructive) |
+| `forget` | Deletes a fact and all its versions, also from disk (marked as destructive). Not a person's fact |
 
 The workspace is fixed by the server configuration, so an agent cannot read another one. Clients configured with the same workspace share the memory, even at the same time: what Claude Code saves, Codex and Cursor find.
 
@@ -163,14 +201,25 @@ bearer_token_env_var = "VIGENTE_TOKEN"
 
 A memory that several agents share, and that lasts between sessions, has to be careful with what goes in and what goes out ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
 
-- **Nothing leaves your computer by default.** The memory is a local SQLite file, and embeddings come from a local model. Sending memories to a non-local embedding service requires `VIGENTE_ALLOW_REMOTE=1`, and system proxies are ignored for local addresses.
+**When it matters.** Claude Code and Codex already protect the session: they ask before running commands, and their models are trained to distrust instructions found in pages or files. What they do not check is what stays written in a memory that outlives the session and that other clients will read. So these filters matter most when the memory is shared:
+
+- between Claude Code, Codex and Cursor, where the memory is only as careful as the least careful client that writes to it;
+- between people, over HTTP, where what someone else saves ends up in your sessions;
+- with agents that read outside content, such as emails, issues or web pages, or agents built from scratch with fewer safeguards of their own.
+
+With a single client, on your own computer, they add less: the main reason to use Vigente is then the other half, knowing what is still true.
+
+What Vigente does:
+
+- **Nothing leaves your computer by default.** The memory is a local SQLite file, and embeddings come from a local model. Sending memories to a non-local embedding service requires `VIGENTE_ALLOW_REMOTE=1`, and system proxies are ignored for local addresses. On a computer with several users and no Ollama running, another one could listen on its port: there, turn embeddings off with `VIGENTE_EMBED_MODEL=none`.
 - **The file is private.** It is created readable by its owner only (folder `0700`, file `0600`). It is not encrypted: disk encryption, such as FileVault or BitLocker, covers it.
 - **Secrets are not stored.** API keys in 10 known formats, passwords written in a sentence or as an environment variable, and random-looking tokens are rejected on save. The error never repeats the secret, and suggests saving where it lives instead. Only a person can override it, from the CLI with `--allow-secret`; MCP clients cannot.
 - **Memories are data, never instructions.** Hidden Unicode that can smuggle text is rejected. Text that reads like an order to the agent is stored but flagged: `recall` warns the agent, and `vigente review` lists it. The server tells the agent never to follow a memory. These are rules in Spanish and English: they catch the obvious, not an attacker who knows them, so [E3](eval/results/e3_security.md) is a ceiling.
-- **Forgetting erases.** `forget` deletes every version from the rows, the text index and both vector tables, and SQLite overwrites the freed space. If another connection is reading at that moment, the text stays in the `-wal` file until it closes, and `forget` says so.
+- **What the CLI shows is what is stored.** Codes that move the cursor or hide text in the terminal are rejected, and if an older memory has them, they are shown replaced.
+- **Forgetting erases.** `forget` deletes every version from the rows, the text index and both vector tables, and SQLite overwrites the freed space. If another connection is reading at that moment, the text stays in the database files until it closes, and `forget` says so.
 - **One agent, one workspace.** The server fixes the workspace; no tool accepts another one.
 - **Over HTTP, a token is required.** At least 32 characters, compared in constant time. The server stays on `127.0.0.1` behind an HTTPS proxy ([ADR-0009](docs/decisions/0009-compartir-por-http.md)).
-- **Audited.** A full review of the code fixed, in v1.3, two privacy issues among others: memory text could reach a system proxy, and the file was readable by other users of the computer ([pull request](https://github.com/laulys/vigente/pull/9)).
+- **Audited twice.** A full review of the code fixed, in v1.3, two privacy issues among others: memory text could reach a system proxy, and the file was readable by other users of the computer ([pull request](https://github.com/laulys/vigente/pull/9)). A security review later fixed a text that blocked the server, terminal codes and several filters ([CHANGELOG](CHANGELOG.md)).
 
 ## Configuration
 
@@ -179,7 +228,7 @@ A memory that several agents share, and that lasts between sessions, has to be c
 | `VIGENTE_DB` | `~/.vigente/vigente.db` | Memory file |
 | `VIGENTE_WORKSPACE` | `default` | Isolated memory space |
 | `VIGENTE_EMBED_MODEL` | `embeddinggemma` | Embedding model; `none` for text-only search |
-| `VIGENTE_EMBED_BASE_URL` | `http://localhost:11434/v1` | Any service with an OpenAI-compatible API |
+| `VIGENTE_EMBED_BASE_URL` | `http://127.0.0.1:11434/v1` | Any service with an OpenAI-compatible API |
 | `VIGENTE_EMBED_API_KEY` | | Only if the service needs one |
 | `VIGENTE_ALLOW_REMOTE` | off | Required to send memories to a non-local service |
 | `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectors + text) or `text` |
@@ -202,6 +251,7 @@ Each decision has an ADR with the alternatives considered (in Spanish):
 8. [One new fact can replace several](docs/decisions/0008-un-hecho-reemplaza-a-varios.md)
 9. [Sharing between computers: HTTP with a token](docs/decisions/0009-compartir-por-http.md)
 10. [Two-stage search: binary vectors, then an exact re-rank](docs/decisions/0010-busqueda-en-dos-pasos.md)
+11. [Who may change what is true](docs/decisions/0011-quien-puede-cambiar-un-hecho.md)
 
 The full design is in [docs/architecture.md](docs/architecture.md).
 

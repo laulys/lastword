@@ -2,6 +2,36 @@
 
 What changed in each version of Vigente. Each one has its [release notes](https://github.com/laulys/vigente/releases), with measurements and upgrade instructions.
 
+## 1.4.0 · 2026-11-25
+
+Who may change a fact, and the fixes from a security review ([pull request](https://github.com/laulys/vigente/pull/12)).
+
+**Added**
+
+- Who may change a fact ([ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md)). Each memory keeps its origin (a person, an agent or outside), and a less trusted origin cannot close or delete a more trusted fact: the change waits for a person. New commands: `pending`, `accept`, `reject` and `confirm`. New MCP field: `from_outside`.
+- E5 measures it, with the rule fixed beforehand, after reproducing the attack: in 1.3.1, 12 of 12 false facts replaced true ones without a warning.
+- The README says when the security filters matter most.
+- `history` over MCP returns the latest 100 versions and says how many it omits.
+
+**Fixed**
+
+From a security review ([details](docs/decisions/0011-quien-puede-cambiar-un-hecho.md#vías-que-encontró-una-revisión-antes-de-publicar)). The bypasses of ADR-0011 were found and fixed before release; these also affected 1.3.1:
+
+- Text with terminal control codes could make the CLI show something other than what was stored. The Escape character is rejected on save, and the CLI never prints control codes raw.
+- A crafted 4,000-character memory took seconds on every read and blocked the server.
+- Text hidden in variation selectors, and common ways to write a password (JSON, Markdown, camelCase), got past the filters.
+- The default embedding address was `localhost`, which may resolve to `::1`, where another local user could listen. It is now `127.0.0.1`.
+- The body of an embedding service's error, and a password in its address, reached the agent. Malformed replies stopped a memory from being saved.
+- In a narrow terminal, the CLI cropped text without saying so.
+- A date written as `.5` or `1.7e9` was stored as 1970 or 2023.
+- Databases created before 1.3 stayed readable by other users: they are made private on upgrade, and `doctor` reports it.
+- `forget` shows every version before asking.
+
+**Changed**
+
+- Database schema v6 → v7. What was saved from the CLI becomes a person's. Databases migrate on first open; older versions cannot open them afterwards.
+- Over MCP, `supersede` on a person's fact returns `new: null` and a warning, and `forget` is refused.
+
 ## 1.3.1 · 2026-11-18
 
 Documentation only; the code does not change ([pull request](https://github.com/laulys/vigente/pull/10)).

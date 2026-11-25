@@ -116,7 +116,7 @@ def test_upgrades_a_database_from_the_first_schema(db_path: Path) -> None:
     old.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
     old.close()
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 6
+    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 7
     assert store.embedding_spaces(conn) == []
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(memories)")}
     assert "memories_superseded_by" in indexes  # v3: varias versiones anteriores
@@ -164,7 +164,7 @@ def test_upgrades_exact_vectors_to_two_stage_search(db_path: Path) -> None:
     raw.close()
 
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == 6
+    assert store.schema_version(conn) == 7
     (space,) = store.embedding_spaces(conn)
     assert (space.table, space.exact) == ("vecb_1", "vecx_1")
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -197,3 +197,24 @@ def test_a_new_database_is_private_to_its_owner(tmp_path: Path) -> None:
     modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in [path.parent, *path.parent.iterdir()]}
     assert modes["nueva"] == 0o700
     assert {mode for name, mode in modes.items() if name != "nueva"} == {0o600}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="permisos POSIX")
+def test_upgrading_makes_an_old_database_private(tmp_path: Path) -> None:
+    """Antes de la v1.3 el archivo nacía legible para otros usuarios del ordenador."""
+    path = tmp_path / "vieja.db"
+    raw = sqlite3.connect(path, autocommit=True)
+    for step in store._MIGRATIONS[:1]:
+        assert isinstance(step, str)
+        raw.executescript(step)
+    raw.execute("PRAGMA user_version = 1")
+    raw.close()
+    path.chmod(0o644)
+    conn = store.connect(path)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert store.integrity_problems(conn) == []
+    path.chmod(0o640)  # después, quien lo cambia lo decide: solo se avisa
+    store.connect(path).close()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert any("chmod 600" in problem for problem in store.integrity_problems(conn))
+    conn.close()

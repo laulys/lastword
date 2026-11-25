@@ -47,6 +47,7 @@ def _chosen_at_runtime() -> set[str]:
         *cli._KIND.values(),
         *cli._SOURCES.values(),
         *cli._MODES.values(),
+        *cli._ORIGIN.values(),
         *safety.labels(),
     }
 

@@ -273,3 +273,17 @@ async def test_one_new_fact_can_replace_several(server: MCPServer, clock: FakeCl
     assert result["old"]["replaced_by"] == result["new"]["id"]
     assert [m["replaced_by"] for m in result["also_old"]] == [result["new"]["id"]]
     assert [v["id"] for v in versions["versions"]] == [ana["id"], luis["id"], result["new"]["id"]]
+
+
+@pytest.mark.anyio
+async def test_a_very_long_history_is_cut(server: MCPServer, clock: FakeClock) -> None:
+    async with Client(server) as client:
+        saved = await ok(client, "remember", content="Versión 0")
+        current = saved["memory"]["id"]
+        for number in range(1, 103):
+            clock.advance(hours=1)
+            made = await ok(client, "supersede", old_id=current, new_content=f"Versión {number}")
+            current = made["new"]["id"]
+        shown = await ok(client, "history", memory_id=current)
+    assert (len(shown["versions"]), shown["omitted"]) == (100, 3)
+    assert shown["versions"][-1]["id"] == current

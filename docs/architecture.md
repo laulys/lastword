@@ -191,10 +191,10 @@ Las fechas de entrada y salida van en ISO 8601. Los errores son estructurados (`
 |---|---|---|
 | Herramienta (anotación MCP) | Entrada | Salida |
 |---|---|---|
-| `remember` (no destructiva) | `content`, `kind="fact"`, `tags?`, `valid_from?`, `confidence?` | `memory`, `possible_supersedes: [{memory, matched_by, similarity}]`, `next_step`, `warnings` |
+| `remember` (no destructiva) | `content`, `kind="fact"`, `tags?`, `valid_from?`, `confidence?`, `from_outside?` | `memory`, `possible_supersedes: [{memory, matched_by, similarity}]`, `next_step`, `warnings` |
 | `recall` (solo lectura) | `query`, `k=5` (máx. 50), `as_of?`, `include_history=false`, `kind?` | `mode`, `results: [...]`, `warnings` |
-| `supersede` (no destructiva) | `old_id`; `also_old_ids?`; **uno** de `new_content` / `new_id`; `reason?`; `valid_from?` (solo con `new_content`) | `new`, `old` (con su `valid_to` cerrado), `also_old`, `warnings` |
-| `forget` (**destructiva**) | `memory_id` | `deleted_ids: [...]`, `warnings` |
+| `supersede` (no destructiva) | `old_id`; `also_old_ids?`; **uno** de `new_content` / `new_id`; `reason?`; `valid_from?` (solo con `new_content`); `from_outside?` | `new` (null si queda pendiente), `old` (con su `valid_to` cerrado), `also_old`, `warnings` |
+| `forget` (**destructiva**) | `memory_id` | `deleted_ids: [...]`, `warnings`; error `protected` si es de una persona |
 | `history` (solo lectura) | `memory_id` | `versions`, de la más antigua a la vigente |
 | `list_memories` (solo lectura) | `kind?`, `status?`, `tag?`, `limit=20`, `cursor?` | `items`, `next_cursor` |
 
@@ -291,11 +291,12 @@ Lo que sigue de esta sección es el plan original.
 Qué se decidió y qué alternativas se descartaron está en el [ADR-0007](decisions/0007-seguridad-de-la-memoria.md). Aquí, cómo encaja:
 
 - **[`safety.py`](../src/vigente/safety.py)** reúne las reglas: expresiones regulares y una medida de entropía, sin dependencias ni LLM.
-- **Al guardar,** `service.remember` y `service.supersede` comprueban el contenido, la fuente, el motivo y las etiquetas antes de calcular el embedding. Los secretos y los caracteres *tag* o bidireccionales se rechazan. Solo la CLI pasa `allow_secrets`; el servidor MCP no tiene forma de hacerlo.
+- **Al guardar,** `service.remember` y `service.supersede` comprueban el contenido, la fuente, el motivo y las etiquetas antes de calcular el embedding. Los secretos y los caracteres *tag* o bidireccionales, los selectores de variación fuera de sitio y los códigos de terminal se rechazan. Solo la CLI pasa `allow_secrets`; el servidor MCP no tiene forma de hacerlo.
 - **Al leer,** `Memory.flags` es un campo calculado, no una columna: cubre las memorias anteriores sin migrar la base, y las reglas pueden mejorar sin reescribir datos.
 - **Coste medido:** unos 13 µs por memoria al guardar y unos 25 µs por memoria leída. `vigente review` recorre el workspace entero, así que con 50.000 memorias rondaría el segundo (estimación, no medida).
 - **Evaluación:** E3 ([informe](../eval/results/e3_security.md)), con casos y reglas fijados antes de escribir los detectores, y una comprobación con los mensajes reales de LongMemEval que llevó a corregir la regla de tokens.
 - E2 guarda los mensajes de LongMemEval con `allow_secrets`: mide la búsqueda, no los filtros, y así sus resultados no cambian.
+- *(v1.4)* **Quién puede cambiar un hecho** ([ADR-0011](decisions/0011-quien-puede-cambiar-un-hecho.md)). `memories.origin` dice de quién viene cada memoria y lo fija la interfaz: la CLI abre el servicio como persona y el servidor MCP, como agente. `pending_changes` guarda los cambios que esperan a una persona: no son memorias, así que ninguna búsqueda los ve, y su texto nunca se cita en un aviso. `contradictions` une dos memorias vigentes parecidas de distinto origen: `recall` no devuelve la menos fiable sin la otra.
 - *(v1.3)* **Privacidad del archivo y de la red**, tras una auditoría del código:
   - la carpeta y el archivo de la memoria se crean con permisos solo para su dueño (0700 y 0600);
   - con un servicio de embeddings local se ignoran `HTTP_PROXY` y `ALL_PROXY`: si no, el texto de las memorias saldría hacia el proxy;

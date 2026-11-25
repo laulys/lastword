@@ -7,7 +7,7 @@ import sqlite3
 from collections.abc import Sequence
 
 from vigente import store
-from vigente.models import Hit, Kind
+from vigente.models import Hit, Kind, Origin
 
 MAX_QUERY_TOKENS = 32
 RRF_K = 60  # constante habitual de Reciprocal Rank Fusion
@@ -42,6 +42,17 @@ def fts_match_expression(text: str) -> str | None:
     return " OR ".join(f'"{token}"' for token in chosen)
 
 
+def words(text: str) -> frozenset[str]:
+    """Las palabras de un texto, sin repetir ni contar las vacías."""
+    return frozenset(_TOKEN.findall(text.lower())) - STOPWORDS
+
+
+def share_most(one: frozenset[str], other: frozenset[str]) -> bool:
+    """¿Comparten la mitad o más de las palabras del texto más corto?"""
+    shortest = min(len(one), len(other))
+    return shortest > 0 and 2 * len(one & other) >= shortest
+
+
 def search_fts(
     conn: sqlite3.Connection,
     workspace_id: str,
@@ -51,6 +62,7 @@ def search_fts(
     at_ms: int | None,
     kind: Kind | None = None,
     exclude_id: str | None = None,
+    origins: Sequence[Origin] | None = None,
 ) -> list[Hit]:
     expression = fts_match_expression(text)
     if expression is None:
@@ -63,6 +75,7 @@ def search_fts(
         at_ms=at_ms,
         kind=kind,
         exclude_id=exclude_id,
+        origins=origins,
     )
     return [Hit(memory=memory, score=-rank, matched_by=["fts"]) for memory, rank in rows]
 

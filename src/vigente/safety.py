@@ -6,7 +6,8 @@ vez se repite en cada sesión y en cada herramienta:
 - **Secretos** (claves de API, contraseñas): se rechazan al guardar. El archivo no está
   cifrado y cualquier agente conectado al workspace los recuperaría.
 - **Caracteres invisibles** que pueden esconder texto (Unicode *tags*, control
-  bidireccional): se rechazan; ninguna memoria los necesita.
+  bidireccional, selectores de variación fuera de sitio) y **códigos de control** que el
+  terminal obedece: se rechazan; ninguna memoria los necesita.
 - **Texto que se dirige al agente como una orden**, o caracteres de ancho cero: se guarda,
   pero marcado, porque hay frases legítimas parecidas. Las marcas se calculan al leer, así
   que también cubren memorias guardadas antes de esta versión.
@@ -77,22 +78,32 @@ _SECRET_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     (
         "url_credentials",
         "una dirección con usuario y contraseña",
-        re.compile(r"\b[a-z][a-z0-9+.-]{0,20}://[^\s/:@]+:[^\s/@]+@", re.IGNORECASE),
+        # El usuario puede faltar: `redis://:contraseña@servidor`.
+        re.compile(r"\b[a-z][a-z0-9+.-]{0,20}://[^\s/:@]*:[^\s/@]+@", re.IGNORECASE),
     ),
 )
 
 # «la contraseña del wifi es …», «password: …», «API key = …», y también con nombre de variable:
-# «DB_PASSWORD=…», «DJANGO_SECRET_KEY=…». Se busca sin tildes.
+# «DB_PASSWORD=…», «DJANGO_SECRET_KEY=…», «dbPassword: …», y entre comillas o en Markdown:
+# «"password": "…"», «**Contraseña:** …». Se busca sin tildes.
 _PASSWORD_PHRASE = re.compile(
     r"(?<![A-Za-z0-9_?&#])(?:[A-Za-z0-9]+_){0,4}"  # no un parámetro de URL: van aparte
-    r"(?:contrasena|password|passwd|pwd|passphrase|clave|token|secreto|secret|api[ _-]?key)s?"
-    r"(?:_(?:key|token|secret|password|passwd|pwd))?\b"
+    r"(?:(?-i:[a-z][a-z0-9]{0,20}(?=[A-Z])))?"  # clientSecret
+    r"(?:(?:contrasena|password|passwd|pwd|passphrase|clave|token|secreto|secret|api[ _-]?key)s?"
+    r"|(?<=_)pass|(?-i:(?<=[a-z0-9])Pass|\bPASS(?==)))"
+    r"(?:_(?:access_key|key|token|secret|password|passwd|pwd|prod|dev|test|staging|local)"
+    r"|(?-i:Key|Token))?\b"
+    r"(?:\s+(?:actual|nueva|nuevo|vieja|ahora|temporal|maestra|current|new|now|old|temporary))?"
     r"(?:\s+(?:de|del|para|of|for)\s+(?:[^\s:=]+\s+){0,3}?[^\s:=]+)?"
-    r"\s*(?:\bes\b|\bera\b|\bis\b|:|=)\s*[\"'«“]?(?P<value>[^\s\"'»”]{6,})",
+    r"[\"'*`]{0,3}\s*(?:(?:\bes\b|\bera\b|\bis\b)\s?:?|:|=)[*`]{0,3}\s*[\"'«“*`]{0,3}"
+    r"(?P<value>[^\s\"'»”*`]{6,})",
     re.IGNORECASE,
 )
 # Identificadores en minúsculas (id_pedido, color.brand.500): nombres, no secretos.
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+")
+_UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
+# Un trozo de código: `tokens = word_tokenize(text)`, `token = $(openssl rand)`, `tokens[i + 1]`.
+_CODE = re.compile(r".*\(|\w+\[|\$\{|process\.env\b|os\.environ\b")
 _NUMBER = re.compile(r"v?\d+(?:[.,/:-]\d+)*")
 _TOKEN = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])")
 _MIN_TOKEN_ENTROPY = 4.0  # bits por carácter; 40 caracteres aleatorios rondan los 5
@@ -107,27 +118,32 @@ _SECRET_QUERY = re.compile(
 _FINGERPRINT = re.compile(r"(?:sha\d+|md5):$", re.IGNORECASE)  # huellas: públicas
 
 
-# Lo que no se ve y puede partir una palabra para que un detector no la reconozca. Solo se
-# quita para detectar: de estos, los que además se marcan o se rechazan están más arriba.
-_INVISIBLE = re.compile(
-    "[\u200b\u200c\u200d\u2060\ufeff"  # ancho cero
-    "\u00ad\u034f\u2061-\u2064"  # guion opcional, unión de grafemas, operadores invisibles
-    "\u200e\u200f\u202a-\u202e\u2066-\u2069"  # marcas y control bidireccional
-    "\ufe00-\ufe0f"  # selectores de variación
-    "\U000e0000-\U000e007f]"  # tags
+# Lo que no se dibuja (Default_Ignorable_Code_Point en Unicode) y los rellenos que se ven como un
+# hueco. Pueden partir una palabra para que un detector no la reconozca: se quitan para detectar.
+# De estos, los que además se marcan o se rechazan están más abajo.
+_IGNORABLE = (
+    "\u00ad\u034f\u061c\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f"
+    "\ufe00-\ufe0f\ufeff\ufff0-\ufffb\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
+    "\U000e0000-\U000e0fff"
 )
+_BLANK = re.compile("[\u115f\u1160\u3164\uffa0\u2800]")
+_INVISIBLE = re.compile(f"[{_IGNORABLE}\u115f\u1160\u3164\uffa0\u2800]")
+
+# Signos que NFKD convierte en muchas letras (㌖ → seis): multiplicarían el texto que hay que
+# revisar y no sirven para escribir una orden en español ni en inglés.
+_EXPANDING = re.compile("[\u3200-\u321e\u327c\u327d\u3300-\u33ff\ufdf0-\ufdff]")
 
 
 def _strip_accents(text: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", text)
+    decomposed = unicodedata.normalize("NFKD", _EXPANDING.sub(" ", text))
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
 def _looks_like_secret(value: str) -> bool:
     value = value.rstrip(".,;:)]}»”\"'")
-    if len(value) < 6 or _IDENTIFIER.fullmatch(value) or _NUMBER.fullmatch(value):
+    if len(value) < 6 or _NUMBER.fullmatch(value) or _CODE.match(value):
         return False
-    if "(" in value:  # una llamada en un trozo de código: `tokens = word_tokenize(text)`
+    if _IDENTIFIER.fullmatch(value) and not _UUID.fullmatch(value):
         return False
     has_letter = any(char.isalpha() for char in value)
     has_digit = any(char.isdigit() for char in value)
@@ -192,9 +208,30 @@ def find_secrets(text: str) -> list[Finding]:
 
 # --- caracteres invisibles
 
-_TAGS = re.compile("[\U000e0000-\U000e007f]")
+_TAGS = re.compile("[\U000e0000-\U000e00ff\U000e01f0-\U000e0fff]")
 _BIDI = re.compile("[\u202a-\u202e\u2066-\u2069]")
-_ZERO_WIDTH = re.compile("[\u200b\u2060\ufeff]")  # no ZWJ ni ZWNJ: los usan emojis y escrituras
+# Un selector de variación legítimo va solo, detrás de un emoji, un signo o un ideograma. En fila
+# o detrás de una letra, sirven para esconder un texto entero, a un byte por carácter. FE0F, el de
+# los emojis, sobra o se repite a veces al copiar, y al ser uno solo no puede llevar un texto.
+_VARIATION = re.compile(
+    "(?!\ufe0f\ufe0f)[\ufe00-\ufe0f\U000e0100-\U000e01ef]{2}"
+    "|(?<=[\x00-\u024f])(?<![0-9#*\u00a9\u00ae])[\ufe00-\ufe0e]"
+    "|(?<![\u2e80-\u2fdf\u3005\u3007\u3400-\u9fff\uf900-\ufaff\U00020000-\U0003ffff])"
+    "[\U000e0100-\U000e01ef]"
+)
+# Escape: con él empiezan las órdenes que el terminal obedece (mover el cursor, borrar o esconder
+# lo ya escrito, cambiar el portapapeles). Se rechaza.
+_TERMINAL = re.compile("\x1b")
+# Los demás de control, salvo el salto de línea y el tabulador, se guardan marcados: aparecen al
+# copiar de un PDF o en un texto mal decodificado. La CLI nunca los enseña tal cual.
+_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]|\x0d(?!\x0a)")
+_ZERO_WIDTH = re.compile(  # ZWJ y ZWNJ sueltos, no: los usan emojis y escrituras
+    "[\u200b\u2060-\u2064\ufeff\u3164\uffa0\u180e\u206a-\u206f\ufff0-\ufffb]"
+    "|[\U0001bca0-\U0001bca3\U0001d173-\U0001d17a]"
+    "|(?<=[A-Za-z0-9])[\u200e\u200f\u061c](?=[A-Za-z0-9])"
+    # Varios seguidos pueden llevar un texto. Corazón en llamas: FE0F y ZWJ, en ese orden.
+    f"|(?!\ufe0f\u200d|\ufe0f\ufe0f)[{_IGNORABLE}]{{2}}"
+)
 
 
 def find_hidden(text: str) -> list[Finding]:
@@ -203,7 +240,14 @@ def find_hidden(text: str) -> list[Finding]:
         findings.append(Finding("hidden:tags", "caracteres Unicode «tag», que esconden texto"))
     if _BIDI.search(text):
         findings.append(Finding("hidden:bidi", "controles que cambian el orden en que se lee"))
-    if _ZERO_WIDTH.search(text):
+    if _VARIATION.search(text):
+        findings.append(Finding("hidden:variation", "selectores de variación, que esconden texto"))
+    if _TERMINAL.search(text):
+        findings.append(Finding("hidden:terminal", "códigos que el terminal obedece"))
+    elif _CONTROL.search(text):
+        findings.append(Finding("hidden:control", "caracteres de control"))
+    rest = _VARIATION.sub("", _BIDI.sub("", _TAGS.sub("", text)))  # ya contados
+    if _ZERO_WIDTH.search(rest):
         findings.append(Finding("hidden:zero_width", "caracteres de ancho cero"))
     return findings
 
@@ -217,7 +261,11 @@ _DATA = (
     r"contrasenas|memory|memories|data|everything|all|customer list|history|conversation\w*|"
     r"credentials)"
 )
-_URL_OR_EMAIL = r"(?:https?://\S+|[\w.+-]+@[\w-]+\.[\w.]+)"
+# Cada hueco excluye lo que sigue, y todo tiene un máximo: sin eso, un texto preparado tardaba
+# segundos en cada lectura.
+_TO_URL_OR_EMAIL = (
+    r"(?:[^.\n]{0,40}https?://\S|[^.\n@]{0,60}(?:\.[\w+-]{1,30}){0,3}@[\w-]{1,63}\.\w)"
+)
 
 _INSTRUCTION_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     (
@@ -235,7 +283,7 @@ _INSTRUCTION_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
         "role",
         "intenta cambiar el papel del agente",
         re.compile(
-            r"\b(?:a partir de ahora|desde ahora|ahora)\s*,?\s*"
+            r"\b(?:a partir de ahora|desde ahora|ahora)\s{0,5}(?:,\s{0,5})?"
             r"(?:eres|seras|actuas como|actua como|te comportas como|haces de)\b"
             r"|\b(?:finge|haz como si)\s+(?:ser|que eres)\b"
             r"|\byou are now\s+(?:an?|the|my|in)\b|\byou are now [a-z]+,"
@@ -276,7 +324,7 @@ _INSTRUCTION_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
         "pide enviar datos fuera",
         re.compile(
             r"\b(?:envia\w*|manda\w*|sube|reenvia\w*|send|upload|post|forward|exfiltrate)\b"
-            rf"[^.\n]{{0,40}}\b{_DATA}\b[^.\n]{{0,40}}{_URL_OR_EMAIL}"
+            rf"[^.\n]{{0,40}}\b{_DATA}\b{_TO_URL_OR_EMAIL}"
         ),
     ),
     (
@@ -284,7 +332,7 @@ _INSTRUCTION_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
         "imita marcas de mensajes del sistema",
         re.compile(
             r"</?(?:system|instructions?|assistant|developer)>|\[/?inst\]|<\|im_(?:start|end)\|>"
-            r"|#{2,}\s*(?:instruccion\w*|instructions?|system|sistema)\b"
+            r"|(?<!#)#{2,20}\s{0,5}(?:instruccion\w*|instructions?|system|sistema)\b"
         ),
     ),
     (
@@ -314,17 +362,30 @@ _INSTRUCTION_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
 _SPACES = re.compile(r"[ \t\u00a0]+")
 
 
+def visible(text: str) -> str:
+    """El texto para enseñarlo en un terminal: lo que el terminal obedecería o no dibujaría sale
+    sustituido, y un salto de línea se ve, para que no pueda imitar otra línea de la salida."""
+    for hidden in (_CONTROL, _VARIATION, _BIDI, _TAGS):
+        text = hidden.sub("\ufffd", text)
+    text = re.sub("[\u200e\u200f\u061c]", "", text)  # cambian el orden en que se lee
+    text = re.sub("\x0d?\x0a|[\u2028\u2029]", " ⏎ ", text)
+    # Muchos espacios seguidos podrían empujar un texto hasta el principio de otra línea.
+    return re.sub(r"[\s\u115f\u1160\u3164\uffa0\u2800]{4,}", " ␣ ", text).replace("\t", " ")
+
+
 def _normalize(text: str) -> str:
     """Sin invisibles, sin tildes, en minúsculas y con un solo espacio entre palabras."""
     return _SPACES.sub(" ", _strip_accents(_INVISIBLE.sub("", text))).lower()
 
 
 def find_instructions(text: str) -> list[Finding]:
-    normalized = _normalize(text)
+    versions = {_normalize(text)}
+    if _BLANK.search(text):  # un relleno puede partir una palabra, o hacer de espacio
+        versions.add(_normalize(_BLANK.sub(" ", text)))
     return [
         Finding(f"instruction:{code}", label)
         for code, label, pattern in _INSTRUCTION_PATTERNS
-        if pattern.search(normalized)
+        if any(pattern.search(version) for version in versions)
     ]
 
 
@@ -338,11 +399,14 @@ _LABELS = {
         Finding("secret:token", "un token o clave con aspecto aleatorio"),
         Finding("hidden:tags", "caracteres Unicode «tag», que esconden texto"),
         Finding("hidden:bidi", "controles que cambian el orden en que se lee"),
+        Finding("hidden:variation", "selectores de variación, que esconden texto"),
+        Finding("hidden:terminal", "códigos que el terminal obedece"),
+        Finding("hidden:control", "caracteres de control"),
         Finding("hidden:zero_width", "caracteres de ancho cero"),
         *(Finding(f"instruction:{code}", label) for code, label, _ in _INSTRUCTION_PATTERNS),
     )
 }
-_BLOCKING_HIDDEN = {"hidden:tags", "hidden:bidi"}
+_BLOCKING_HIDDEN = {"hidden:tags", "hidden:bidi", "hidden:variation", "hidden:terminal"}
 
 
 def describe(code: str) -> str:

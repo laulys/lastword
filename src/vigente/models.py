@@ -29,6 +29,7 @@ MAX_CONTENT_CHARS = 4000
 MAX_TAGS = 20
 MAX_K = 50
 MAX_LIST_LIMIT = 100
+MAX_DIM = 8192  # de un vector
 MAX_ALSO_SUPERSEDED = 20  # hechos que una sola versión nueva puede reemplazar además de old_id
 
 
@@ -45,22 +46,35 @@ class SearchMode(StrEnum):
     TEXT = "text"  # solo palabras (BM25)
 
 
+class Origin(StrEnum):
+    """De quién viene una memoria (ADR-0011). Lo fija la interfaz: por MCP nunca es `person`."""
+
+    PERSON = "person"  # una persona, desde la CLI, o algo que una persona confirmó
+    AGENT = "agent"  # un agente conectado
+    EXTERNAL = "external"  # contenido de fuera que un agente recogió: un correo, una página
+
+    @property
+    def rank(self) -> int:
+        """Cuanto mayor, más fiable. Un origen no puede cerrar un hecho de rango mayor."""
+        return _RANKS[self]
+
+
+_RANKS = {Origin.EXTERNAL: 0, Origin.AGENT: 1, Origin.PERSON: 2}
+
+
 class Status(StrEnum):
     ACTIVE = "active"  # no tiene sucesor
     SUPERSEDED = "superseded"  # otra memoria la reemplazó
 
 
 MAX_YEAR = 9998  # el final de 9999 es la marca de «sin fecha de fin» en la base de datos
-_NUMBER = re.compile(r"[+-]?\d+(?:\.\d+)?")
+_ISO_DATE = re.compile(r"\s*[+-]?\d{4}-\d{2}-\d{2}")
 
 
 def _only_iso(value: object) -> object:
     """Pydantic lee un número, también escrito como texto, como segundos desde 1970: «2024»
     acabaría siendo el 1 de enero de 1970. Una fecha se escribe en ISO 8601."""
-    is_number = isinstance(value, int | float) or (
-        isinstance(value, str) and _NUMBER.fullmatch(value.strip()) is not None
-    )
-    if is_number:
+    if isinstance(value, int | float) or (isinstance(value, str) and not _ISO_DATE.match(value)):
         raise ValueError(tr("escribe la fecha en formato ISO 8601, por ejemplo 2026-03-01"))
     return value
 
@@ -197,6 +211,7 @@ class Memory(BaseModel):
     superseded_by_id: str | None = None
     supersede_reason: str | None = None  # por qué esta versión reemplazó a la anterior
     embedding_model: str | None = None  # modelo del último vector calculado; None = sin vector
+    origin: Origin = Origin.AGENT
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -217,6 +232,44 @@ class Hit(BaseModel):
     similarity: float | None = None  # similitud coseno, si la encontró la búsqueda vectorial
 
 
+class PendingChange(BaseModel):
+    """Un cambio que un origen menos fiable pidió sobre hechos más fiables (ADR-0011).
+
+    No es una memoria: no sale en búsquedas, listas ni historial hasta que una persona lo acepta.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    old_ids: list[str]
+    content: str | None = None  # texto nuevo, o…
+    new_id: str | None = None  # …una memoria ya guardada
+    reason: str | None = None
+    tags: list[str] | None = None
+    source: str | None = None
+    confidence: float | None = None
+    valid_from: datetime | None = None
+    origin: Origin
+    created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def flags(self) -> list[str]:
+        return safety.flags([self.content, self.reason, self.source, *(self.tags or [])])
+
+
+class PendingPreview(BaseModel):
+    """Lo que ocurriría al aceptar un cambio pendiente."""
+
+    olds: list[Memory]
+    content: str
+    already_replaced: list[Memory] = Field(default_factory=list)  # si es una memoria guardada
+    tags: list[str]
+    start: datetime | None  # None = en el momento de aceptarlo
+    flags: list[str]
+    stale: bool  # alguno de los hechos ya no está o ya se reemplazó
+
+
 class RememberResult(BaseModel):
     memory: Memory
     possible_supersedes: list[Hit]
@@ -232,6 +285,12 @@ class SupersedeResult(BaseModel):
 
 class ForgetResult(BaseModel):
     deleted_ids: list[str]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RejectResult(BaseModel):
+    rejected_id: str
+    kept_id: str | None = None  # la memoria que se pedía usar: sigue guardada, sin ser la vigente
     warnings: list[str] = Field(default_factory=list)
 
 

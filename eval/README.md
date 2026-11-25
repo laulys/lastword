@@ -91,6 +91,25 @@ La búsqueda por vectores era exacta y su coste crecía de forma lineal ([escala
 - **Prueba previa**, hecha a mano con los 89.539 mensajes reales de LongMemEval y sus 470 preguntas: reordenando 100 candidatos se recupera el 97,9% del top 10 exacto, y el primer resultado coincide en el 100% de las preguntas. Recorrer los vectores binarios cuesta 5,5 ms; leer los candidatos exactos desde sqlite-vec, 15 ms, y desde una tabla SQLite normal, 0,1 ms. De ahí el diseño: binarios en sqlite-vec y exactos en una tabla normal.
 - **Regla:** se adopta si **(a)** el MRR de E1 y el de E2 no bajan más de 0.005 y **(b)** con 50.000 memorias, `recall` es al menos un 30% más rápido que la búsqueda exacta (p50 de [`scale.py`](scale.py)). Si no, se queda la exacta.
 
+## Protocolo: quién puede cambiar un hecho (E5)
+
+Fijado antes de implementar el [ADR-0011](../docs/decisions/0011-quien-puede-cambiar-un-hecho.md).
+
+- **Datos:**
+  - los 12 pares inventados de [`e5_trust.py`](e5_trust.py), escritos antes de ver el resultado;
+  - los 72 pares de *knowledge-update* de LongMemEval, un conjunto público: el mensaje más antiguo con evidencia hace de hecho verdadero y el más reciente, de cambio. No son mentiras, pero se parecen como se parecen un dato y su cambio en una conversación real;
+  - las 10 frases del mismo tema y las 8 sin relación de [`embedding_choice.json`](data/embedding_choice.json), escritas mucho antes, para contar avisos de más.
+- **Vías, con el hecho verdadero guardado por una persona y el ataque de un agente o de un origen externo:** `supersede` con texto, `remember` y después `supersede` con `new_id`, `remember` solo, reenlazar dos hechos de la persona, y `forget` seguido de `remember`. Los pares de cada conjunto comparten un mismo workspace, así que compiten entre sí.
+- **Se mide, con embeddinggemma y también sin embeddings:** cuántos hechos de la persona quedan cerrados o borrados; cuántas veces `recall` (k = 5 y k = 1) devuelve el falso sin el verdadero, y sin ningún aviso; y cuántas frases legítimas provocan aviso.
+- **Sin protección, y también se publica:** un agente que cambia lo que guardó otro agente.
+- **Regla.** Se adopta si:
+  - **(a)** por `supersede`, `new_id`, reenlace y `forget`, ningún hecho de una persona queda cerrado ni borrado, en ningún caso;
+  - **(b)** por `remember`, con embeddings y k = 5, el falso llega acompañado del verdadero y con aviso en al menos el 90% de los pares de cada conjunto;
+  - **(c)** entre orígenes iguales, todos los cambios funcionan como antes;
+  - **(d)** el MRR de E1 y el de E2 no bajan más de 0,005.
+
+**Cambio respecto a la primera versión de este protocolo,** también antes de implementar: pedía 30 casos escritos por otra persona, que no están disponibles. Se sustituyen por LongMemEval, que es público. Se añaden las vías de reenlace y de borrado, que el diseño no contemplaba.
+
 ## Reproducibilidad
 
 E1 y E2 dan resultados idénticos en ejecuciones repetidas, comprobado comparando las salidas de dos ejecuciones. Para conseguirlo hubo que quitar el desempate por id en la fusión, porque los ULID tienen una parte aleatoria. Las latencias de `scale.py` varían unas décimas de milisegundo entre ejecuciones.
@@ -107,4 +126,5 @@ uv run python eval/scale.py                  # latencia y escala
 uv run python eval/e3_security.py            # seguridad; con LongMemEval descargado, también texto real
 uv run python eval/e4_exact.py               # códigos exactos
 uv run python eval/masked_similarity.py      # propuestas con los valores tapados (ADR-0004)
+uv run python eval/e5_trust.py               # quién puede cambiar un hecho; con LongMemEval descargado
 ```

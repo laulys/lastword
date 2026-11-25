@@ -45,8 +45,44 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 
 Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.md)), y E1 y E2 dan resultados idénticos al repetirlos.
 
+## Investigación de seguridad: ¿puede una mentira reemplazar a un hecho?
+
+**La pregunta.** Los filtros paran secretos y órdenes. Pero una mentira escrita como una frase normal no es ninguna de las dos cosas. [ShadowMerge](https://arxiv.org/abs/2605.09033) (mayo de 2026) ataca así a las memorias en grafo: en vez de una orden, introduce una relación corriente que contradice a la verdadera. Sus autores miden un 93,8% de éxito medio sobre Mem0 y concluyen que las defensas de entrada representativas no bastan. Vigente no es un grafo y no se ha ejecutado ShadowMerge contra él, pero la idea se traslada.
+
+**Qué pasó aquí.** Una persona guarda «el proveedor cobra en la cuenta acabada en 4471». Un agente que leyó un correo falso lo reemplaza por «…acabada en 9902». En la versión 1.3.1, con 12 casos así, se aceptaron las 12 mentiras, ninguna con aviso, y `recall` devolvía solo la mentira. `remember` incluso proponía al agente cerrar el hecho verdadero. La verdad se recuperaba siempre con `history`, pero nadie avisaba de que había que mirarlo.
+
+**La solución.** Cada memoria guarda su origen: una persona, un agente o algo que un agente trajo de fuera. Lo fija la interfaz, no quien escribe: por MCP nadie es nunca una persona. Un origen menos fiable no puede cerrar ni borrar un hecho más fiable. El cambio espera, el hecho verdadero sigue vigente y decide una persona (`vigente pending`, `accept`, `reject`). Medido con la regla fijada [antes de escribir el código](eval/README.md), con 12 pares inventados y 70 de un benchmark público ([script](eval/e5_trust.py), [resultados](eval/results/e5_trust.md)):
+
+| Ataque a un hecho que guardó una persona | Hechos cerrados o borrados | La mentira sale sin la verdad (k=5) |
+|---|---:|---:|
+| `supersede`, con texto o con una memoria guardada | **0 de 82** | 0 |
+| Enlazar dos hechos de la propia persona | **0 de 82** | 0 |
+| `forget` y después guardar la mentira | **0 de 82** | 0 |
+| `remember` de la mentira junto a la verdad | no aplica | 0 |
+
+**Revisada antes de publicarla.** E5 cumplía, y aun así una revisión de seguridad encontró dos formas de dejar la protección sin efecto y varias menores: por ejemplo, cambiar el texto mientras la persona decide. Están corregidas, con un test por ataque, y contadas en el [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md#vías-que-encontró-una-revisión-antes-de-publicar). Medir bien cinco vías no demuestra que no haya una sexta.
+
+**Lo que no resuelve:**
+
+- **Un agente puede seguir cambiando lo que guardó otro agente.** Mismo origen, sin protección. `vigente confirm` protege un hecho que una persona da por bueno.
+- **Las mentiras guardadas junto a la verdad solo se mitigan.** Salen las dos, la fiable primero. La tabla es con embeddings: pidiendo un solo resultado, 3 de 23 mentiras salieron solas, y sin embeddings, 1 de 66 con cinco resultados. El aviso nombra a las dos en 58 de 69 casos reales (84%): por debajo del 90% fijado antes, si tiene que nombrar a las dos. Leída al pie de la letra, la regla se cumple con 63 de 69.
+- **Cuesta avisos de más.** Las 10 frases legítimas del mismo tema que un hecho de una persona llevaron uno. Sin embeddings, también 2 de 8 sin relación.
+- **Un agente con acceso a la terminal puede usar la CLI,** y ahí cuenta como una persona.
+
+**Cómo lo tratan otros**, leído en su código el 25 de noviembre de 2026, sin ejecutarlo:
+
+| Proyecto | Fechas de validez | ¿La confianza decide qué reemplaza a qué? |
+|---|---|---|
+| [Graphiti](https://github.com/getzep/graphiti/blob/38eef1eb9f9e993effc9801d64cb73aaf9d3cbbd/graphiti_core/utils/maintenance/edge_operations.py#L795) | Sí | No: vale la fecha posterior |
+| [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard/blob/2628cfdb91731ab80caf7fcb0adbe293645ce6e3/src/agent_memory_guard/policies/access.py#L58) | No se encontraron | En parte: reglas de quién escribe qué; cuarentena y vuelta atrás |
+| [ShieldCortex](https://github.com/Drakon-Systems-Ltd/ShieldCortex/blob/128a0734883f33309c9ebfe171c9511fcfb9f6b8/src/threat-graph/conflict.ts#L36) | En parte, en su grafo | En parte: la confianza señala conflictos en cuatro tipos de relación y decide una persona |
+
+El diseño, lo que se descartó y por qué, en el [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md).
+
 ## Novedades desde la 1.0
 
+- **Quién puede cambiar un hecho (1.4).** Un origen menos fiable no puede reemplazar un hecho más fiable: el cambio espera a una persona ([por qué](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
+- **Revisión de seguridad (1.4).** Tres pasadas de revisores automáticos, antes de publicar: dos formas de esquivar esa protección, texto escondido, códigos de terminal y un patrón que bloqueaba el servidor, todo corregido ([CHANGELOG](CHANGELOG.md)).
 - **Seguridad (1.1).** Rechaza los secretos y los caracteres Unicode invisibles al guardar, y marca el texto que suena a orden para el agente. `vigente review` lista lo marcado.
 - **Un hecho reemplaza a varios (1.2).** «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos de una vez: `also_old_ids` en MCP, `--also` en la CLI. Desde la 1.3 se puede sumar otro hecho después al mismo reemplazo.
 - **Compartirla entre ordenadores (1.2).** `vigente-mcp --http` sirve la memoria a otros ordenadores, a un equipo o a un agente en la nube, con un token obligatorio. Desde la 1.3, `--allowed-host` la deja en localhost detrás de un proxy HTTPS.
@@ -63,7 +99,7 @@ Cada versión, en detalle: [CHANGELOG.md](CHANGELOG.md) (en inglés).
 - **El motor no llama a ningún LLM.** `remember` usa embeddings locales (embeddinggemma con Ollama) para proponer hechos que lo nuevo podría reemplazar. Decide el agente, que ya es un LLM. Las propuestas priorizan no perder ningún reemplazo (17 de 18 en el conjunto escrito a mano), así que las frases del mismo tema también reciben una: la similitud no distingue «esto actualiza aquello» de «esto añade un detalle», y [tapar nombres y cifras no ayudó](docs/decisions/0004-modelo-de-embeddings.md).
 - **Olvidar es borrar de verdad.** `forget` borra todas las versiones de un hecho de las filas, de los dos índices y del disco. Un test comprueba que los bytes desaparecen del archivo.
 - **Si algo falla, sigue funcionando.** Sin embeddings, busca por texto. Se niega a enviar memorias a un servicio que no sea local salvo que lo permitas.
-- **Se puede compartir entre agentes con seguridad.** Rechaza los secretos al guardar y marca las memorias que suenan a orden ([Seguridad y privacidad](#seguridad-y-privacidad)).
+- **Está hecha para compartirse entre agentes.** Rechaza los secretos al guardar y marca las memorias que suenan a orden ([Seguridad y privacidad](#seguridad-y-privacidad)). Un dato falso no es ninguna de las dos cosas, así que un origen menos fiable no puede reemplazar un hecho más fiable ([qué cubre y qué no](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
 
 ## Probarlo
 
@@ -89,6 +125,8 @@ Todos los comandos de la CLI (`vigente --help` muestra sus opciones):
 | `list` | Lista memorias, las más recientes primero, con filtros |
 | `forget` | Borra para siempre un hecho y todas sus versiones |
 | `review` | Lista las memorias marcadas: posibles órdenes al agente, caracteres ocultos o secretos |
+| `confirm` | Da por bueno un hecho que guardó un agente: solo una persona lo cambia |
+| `pending`, `accept`, `reject` | Cambios que esperan a que decida una persona |
 | `reindex` | Calcula los vectores que falten |
 | `doctor`, `stats` | Comprueba la base de datos y sus índices; cuenta memorias |
 | `init` | Crea la base de datos y el workspace |
@@ -163,14 +201,25 @@ bearer_token_env_var = "VIGENTE_TOKEN"
 
 Una memoria que comparten varios agentes, y que dura entre sesiones, tiene que cuidar lo que entra y lo que sale ([ADR-0007](docs/decisions/0007-seguridad-de-la-memoria.md)).
 
-- **Por defecto, nada sale de tu ordenador.** La memoria es un archivo SQLite local, y los embeddings los calcula un modelo local. Enviar memorias a un servicio de embeddings no local exige `VIGENTE_ALLOW_REMOTE=1`, y con direcciones locales se ignoran los proxies del sistema.
+**Cuándo importa.** Claude Code y Codex ya protegen la sesión: piden permiso antes de ejecutar comandos, y sus modelos están entrenados para desconfiar de las órdenes que aparecen en páginas o archivos. Lo que no revisan es lo que queda escrito en una memoria que dura más que la sesión y que leerán otros clientes. Por eso estos filtros importan sobre todo cuando la memoria se comparte:
+
+- entre Claude Code, Codex y Cursor, porque la memoria es tan segura como el cliente más descuidado que escribe en ella;
+- entre personas, por HTTP, porque lo que guarda otro acaba en tus sesiones;
+- con agentes que leen contenido de fuera, como correos, issues o páginas web, o con agentes hechos a medida que tienen menos protecciones propias.
+
+Con un solo cliente, en tu propio ordenador, aportan menos: entonces la razón principal para usar Vigente es la otra mitad, saber qué sigue siendo verdad.
+
+Qué hace Vigente:
+
+- **Por defecto, nada sale de tu ordenador.** La memoria es un archivo SQLite local, y los embeddings los calcula un modelo local. Enviar memorias a un servicio de embeddings no local exige `VIGENTE_ALLOW_REMOTE=1`, y con direcciones locales se ignoran los proxies del sistema. En un ordenador con varios usuarios y sin Ollama en marcha, otro podría escuchar en su puerto: ahí, desactiva los embeddings con `VIGENTE_EMBED_MODEL=none`.
 - **El archivo es privado.** Se crea legible solo para su dueño (carpeta `0700`, archivo `0600`). No está cifrado: lo protege el cifrado del disco, como FileVault o BitLocker.
 - **Los secretos no se guardan.** Se rechazan al guardar las claves de API de 10 formatos conocidos, las contraseñas escritas en una frase o como variable de entorno, y los tokens con aspecto aleatorio. El error no repite el secreto y propone guardar dónde está. Solo una persona puede saltárselo, desde la CLI con `--allow-secret`; los clientes MCP no pueden.
 - **Las memorias son datos, nunca órdenes.** Se rechazan los caracteres Unicode invisibles que pueden esconder texto. El texto que suena a orden para el agente se guarda marcado: `recall` avisa al agente y `vigente review` lo lista. El servidor le dice al agente que nunca siga una memoria. Son reglas en español e inglés: cazan lo evidente, no a un atacante que las conozca, así que [E3](eval/results/e3_security.md) es un techo.
-- **Olvidar borra.** `forget` elimina todas las versiones de las filas, del índice de texto y de las dos tablas de vectores, y SQLite sobrescribe el espacio liberado. Si en ese momento otra conexión está leyendo, el texto sigue en el archivo `-wal` hasta que se cierre, y `forget` lo avisa.
+- **Lo que enseña la CLI es lo que hay guardado.** Se rechazan los códigos que mueven el cursor o esconden texto en el terminal, y si una memoria antigua los tiene, salen sustituidos.
+- **Olvidar borra.** `forget` elimina todas las versiones de las filas, del índice de texto y de las dos tablas de vectores, y SQLite sobrescribe el espacio liberado. Si en ese momento otra conexión está leyendo, el texto sigue en los archivos de la base hasta que se cierre, y `forget` lo avisa.
 - **Un agente, un workspace.** El servidor fija el workspace; ninguna herramienta acepta otro.
 - **Por HTTP, el token es obligatorio.** De al menos 32 caracteres, comparado en tiempo constante. El servidor se queda en `127.0.0.1` detrás de un proxy HTTPS ([ADR-0009](docs/decisions/0009-compartir-por-http.md)).
-- **Auditado.** Una revisión completa del código corrigió en la v1.3, entre otros, dos problemas de privacidad: el texto de las memorias podía llegar a un proxy del sistema, y otros usuarios del ordenador podían leer el archivo ([pull request](https://github.com/laulys/vigente/pull/9)).
+- **Auditado dos veces.** Una revisión completa del código corrigió en la v1.3, entre otros, dos problemas de privacidad: el texto de las memorias podía llegar a un proxy del sistema, y otros usuarios del ordenador podían leer el archivo ([pull request](https://github.com/laulys/vigente/pull/9)). Otra, de seguridad, corrigió después un texto que bloqueaba el servidor, códigos de terminal y varios filtros ([CHANGELOG](CHANGELOG.md)).
 
 ## Configuración
 
@@ -179,7 +228,7 @@ Una memoria que comparten varios agentes, y que dura entre sesiones, tiene que c
 | `VIGENTE_DB` | `~/.vigente/vigente.db` | Archivo de la memoria |
 | `VIGENTE_WORKSPACE` | `default` | Espacio aislado de memorias |
 | `VIGENTE_EMBED_MODEL` | `embeddinggemma` | Modelo de embeddings; `none` para buscar solo por texto |
-| `VIGENTE_EMBED_BASE_URL` | `http://localhost:11434/v1` | Cualquier servicio con la API de OpenAI |
+| `VIGENTE_EMBED_BASE_URL` | `http://127.0.0.1:11434/v1` | Cualquier servicio con la API de OpenAI |
 | `VIGENTE_EMBED_API_KEY` | | Solo si el servicio la pide |
 | `VIGENTE_ALLOW_REMOTE` | desactivado | Necesario para enviar memorias a un servicio no local |
 | `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectores + texto) o `text` |
@@ -202,6 +251,7 @@ Cada decisión tiene un ADR con las alternativas que se consideraron:
 8. [Un hecho nuevo puede reemplazar a varios](docs/decisions/0008-un-hecho-reemplaza-a-varios.md)
 9. [Compartir entre ordenadores: HTTP con token](docs/decisions/0009-compartir-por-http.md)
 10. [Búsqueda en dos pasos: vectores binarios y reordenación exacta](docs/decisions/0010-busqueda-en-dos-pasos.md)
+11. [Quién puede cambiar lo que es verdad](docs/decisions/0011-quien-puede-cambiar-un-hecho.md)
 
 El diseño completo está en [docs/architecture.md](docs/architecture.md).
 

@@ -9,7 +9,6 @@ el resto del código no tenga que conocerlo.
 from __future__ import annotations
 
 import ipaddress
-import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -20,10 +19,18 @@ import httpx
 
 from vigente.errors import ConfigError, EmbeddingError
 from vigente.i18n import tr
+from vigente.models import MAX_DIM
 
 Purpose = Literal["document", "query", "similarity"]
 
-DEFAULT_BASE_URL = "http://localhost:11434/v1"  # Ollama, API compatible con OpenAI
+# Ollama, API compatible con OpenAI. Con la dirección y no con «localhost»: ese nombre puede
+# resolverse antes a ::1, donde Ollama no escucha y otro usuario del equipo sí podría.
+DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
+# Los vectores se guardan como float32. Fuera de estos límites, al calcular distancias, los
+# cuadrados se desbordan o se quedan en cero y la búsqueda no devolvería nada.
+MIN_VALUE, MAX_VALUE = 1e-15, 1e15
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+READ_DEADLINE = 120.0  # segundos, para la respuesta entera
 
 
 @dataclass(frozen=True)
@@ -95,6 +102,13 @@ def is_local_url(url: str) -> bool:
         return False
 
 
+def _without_credentials(url: str) -> str:
+    """Para los mensajes, que pueden llegar a otros agentes: sin usuario, contraseña ni consulta."""
+    parts = urlparse(url)
+    host = parts.netloc.rpartition("@")[2]
+    return f"{parts.scheme}://{host}{parts.path}"
+
+
 class OpenAICompatibleEmbedder:
     """Cliente de `POST /embeddings`. Sirve para Ollama, LM Studio, OpenRouter u OpenAI.
 
@@ -122,7 +136,7 @@ class OpenAICompatibleEmbedder:
                 tr(
                     "{url} no es una dirección local. Para enviar el contenido de las memorias a "
                     "un servicio remoto, activa VIGENTE_ALLOW_REMOTE=1.",
-                    url=base_url,
+                    url=_without_credentials(base_url),
                 )
             )
         self._model = model
@@ -131,7 +145,9 @@ class OpenAICompatibleEmbedder:
         self._max_retries = max_retries
         self._batch_size = batch_size
         self._sleep = sleep
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        headers = {"Accept-Encoding": "identity"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         # Con un servicio local se ignoran HTTP_PROXY y ALL_PROXY: si no, httpx enviaría el
         # texto de las memorias al proxy aunque la dirección sea localhost.
         self._client = httpx.Client(
@@ -168,9 +184,7 @@ class OpenAICompatibleEmbedder:
             if attempt:
                 self._sleep(0.5 * 2 ** (attempt - 1))
             try:
-                response = self._client.post(
-                    "embeddings", json={"model": self._model, "input": batch}
-                )
+                response = self._post({"model": self._model, "input": batch})
             except httpx.TimeoutException:
                 problem = tr("tiempo de espera agotado")
                 continue
@@ -181,10 +195,12 @@ class OpenAICompatibleEmbedder:
                     tr(
                         "No se pudo conectar con {url} ({error}). ¿Está corriendo el servicio de "
                         "embeddings?",
-                        url=self._base_url,
+                        url=_without_credentials(self._base_url),
                         error=type(exc).__name__,
                     )
                 ) from exc
+            except httpx.DecodingError as exc:
+                raise EmbeddingError(tr("Respuesta de embeddings con formato inesperado.")) from exc
             except httpx.TransportError as exc:
                 problem = tr("no se pudo conectar ({error})", error=type(exc).__name__)
                 continue
@@ -192,11 +208,13 @@ class OpenAICompatibleEmbedder:
                 problem = f"HTTP {response.status_code}"
                 continue
             if response.status_code >= 400:
+                # Sin el cuerpo: lo escribe el servicio y llegaría al agente como un aviso nuestro.
                 raise EmbeddingError(
                     tr(
-                        "El servicio de embeddings rechazó la petición (HTTP {status}): {body}",
+                        "El servicio de embeddings rechazó la petición (HTTP {status}). "
+                        "¿Tiene el modelo {model}?",
                         status=response.status_code,
-                        body=response.text[:200],
+                        model=self._model,
                     )
                 )
             return _parse(response, expected=len(batch))
@@ -204,10 +222,26 @@ class OpenAICompatibleEmbedder:
             tr(
                 "No se pudieron calcular embeddings con {model} en {url}: {problem}.",
                 model=self._model,
-                url=self._base_url,
+                url=_without_credentials(self._base_url),
                 problem=problem,
             )
         )
+
+    def _post(self, payload: dict[str, Any]) -> httpx.Response:
+        """Lee la respuesta con un máximo de tamaño y de tiempo, y sin descomprimir: un servicio
+        averiado no debe llenar la memoria ni dejar la llamada abierta."""
+        deadline = time.monotonic() + READ_DEADLINE
+        with self._client.stream("POST", "embeddings", json=payload) as response:
+            if response.headers.get("content-encoding", "identity") != "identity":
+                raise EmbeddingError(tr("Respuesta de embeddings con formato inesperado."))
+            body = bytearray()
+            for chunk in response.iter_bytes():
+                body += chunk
+                if len(body) > MAX_RESPONSE_BYTES:
+                    raise EmbeddingError(tr("Respuesta de embeddings con formato inesperado."))
+                if time.monotonic() > deadline:
+                    raise httpx.ReadTimeout("respuesta demasiado lenta")
+            return httpx.Response(response.status_code, content=bytes(body))
 
 
 def _parse(response: httpx.Response, *, expected: int) -> list[list[float]]:
@@ -215,7 +249,14 @@ def _parse(response: httpx.Response, *, expected: int) -> list[list[float]]:
         items: list[dict[str, Any]] = response.json()["data"]
         ordered = sorted(enumerate(items), key=lambda pair: int(pair[1].get("index", pair[0])))
         vectors = [[float(value) for value in item["embedding"]] for _, item in ordered]
-    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+    except (
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        OverflowError,
+        RecursionError,
+    ) as exc:
         raise EmbeddingError(tr("Respuesta de embeddings con formato inesperado.")) from exc
     if len(vectors) != expected:
         raise EmbeddingError(
@@ -227,9 +268,11 @@ def _parse(response: httpx.Response, *, expected: int) -> list[list[float]]:
         )
     if any(not vector for vector in vectors):
         raise EmbeddingError(tr("El servicio devolvió un vector vacío."))
-    if not all(math.isfinite(value) for vector in vectors for value in vector):
+    if any(len(vector) > MAX_DIM for vector in vectors):
+        raise EmbeddingError(tr("Respuesta de embeddings con formato inesperado."))
+    if not all(abs(value) <= MAX_VALUE for vector in vectors for value in vector):
         raise EmbeddingError(tr("El servicio devolvió valores no numéricos (NaN o infinito)."))
-    if any(not any(vector) for vector in vectors):
+    if any(max(map(abs, vector)) < MIN_VALUE for vector in vectors):
         # Un vector de ceros no tiene dirección: su distancia coseno a cualquier otro no existe.
         raise EmbeddingError(tr("El servicio devolvió un vector nulo (todo ceros)."))
     return vectors
