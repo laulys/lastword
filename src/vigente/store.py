@@ -25,7 +25,7 @@ import sqlite_vec
 
 from vigente.errors import ConfigError, DatabaseError, SchemaVersionError
 from vigente.i18n import tr
-from vigente.models import Kind, Memory, Origin, PendingChange, Status
+from vigente.models import MAX_DIM, Kind, Memory, Origin, PendingChange, Status
 
 OPEN_END_MS = 253_402_300_799_999  # 9999-12-31T23:59:59.999Z
 BUSY_TIMEOUT_MS = 5000  # cuánto espera una conexión a que otra suelte la base
@@ -743,7 +743,6 @@ def _valid_to_ms(memory: Memory) -> int:
 # --- vectores
 
 _VECTOR_TABLE = re.compile(r"^vecb_\d+$")
-MAX_DIM = 8192
 RERANK_MIN = 100  # candidatos que se reordenan como mínimo (ADR-0010)
 
 

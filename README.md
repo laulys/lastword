@@ -224,7 +224,7 @@ What Vigente does:
 | `VIGENTE_DB` | `~/.vigente/vigente.db` | Memory file |
 | `VIGENTE_WORKSPACE` | `default` | Isolated memory space |
 | `VIGENTE_EMBED_MODEL` | `embeddinggemma` | Embedding model; `none` for text-only search |
-| `VIGENTE_EMBED_BASE_URL` | `http://localhost:11434/v1` | Any service with an OpenAI-compatible API |
+| `VIGENTE_EMBED_BASE_URL` | `http://127.0.0.1:11434/v1` | Any service with an OpenAI-compatible API |
 | `VIGENTE_EMBED_API_KEY` | | Only if the service needs one |
 | `VIGENTE_ALLOW_REMOTE` | off | Required to send memories to a non-local service |
 | `VIGENTE_SEARCH_MODE` | `vector` | `hybrid` (vectors + text) or `text` |

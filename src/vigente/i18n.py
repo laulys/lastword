@@ -117,7 +117,7 @@ EN: dict[str, str] = {
     "Respuesta de embeddings con formato inesperado.": "Embedding response with an unexpected format.",
     "tiempo de espera agotado": "timed out",
     "no se pudo conectar ({error})": "could not connect ({error})",
-    "El servicio de embeddings rechazó la petición (HTTP {status}): {body}": "The embedding service rejected the request (HTTP {status}): {body}",
+    "El servicio de embeddings rechazó la petición (HTTP {status}). ¿Tiene el modelo {model}?": "The embedding service rejected the request (HTTP {status}). Does it have the model {model}?",
     "No se pudo conectar con {url} ({error}). ¿Está corriendo el servicio de embeddings?": "Could not connect to {url} ({error}). Is the embedding service running?",
     "indica new_content o new_id (uno de los dos)": "give new_content or new_id (one of the two)",
     "con new_id, la vigencia y los demás datos son los de esa memoria": "with new_id, the validity and the other data are those of that memory",

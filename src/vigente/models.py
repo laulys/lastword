@@ -29,6 +29,7 @@ MAX_CONTENT_CHARS = 4000
 MAX_TAGS = 20
 MAX_K = 50
 MAX_LIST_LIMIT = 100
+MAX_DIM = 8192  # de un vector
 MAX_ALSO_SUPERSEDED = 20  # hechos que una sola versión nueva puede reemplazar además de old_id
 
 

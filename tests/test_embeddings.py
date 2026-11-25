@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import httpx
 import pytest
 
+from vigente import embeddings
 from vigente.config import DEFAULT_EMBED_MODEL, EmbeddingSettings
 from vigente.embeddings import PROFILES, ModelProfile, OpenAICompatibleEmbedder, profile_for
 from vigente.errors import ConfigError, EmbeddingError
@@ -27,6 +28,16 @@ def answer(request: httpx.Request, dim: int = 3) -> httpx.Response:
     inputs = json.loads(request.content)["input"]
     data = [{"index": i, "embedding": [float(i + 1)] * dim} for i in range(len(inputs))]
     return httpx.Response(200, json={"data": data})
+
+
+class Raw(httpx.SyncByteStream):
+    """Unos bytes tal cual, sin que httpx los descomprima al crear la respuesta."""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield self._data
 
 
 class Recorder:
@@ -102,9 +113,11 @@ class TestErrors:
 
     def test_client_errors_are_not_retried(self) -> None:
         recorder = Recorder(httpx.Response(400, text="modelo desconocido"))
-        with pytest.raises(EmbeddingError, match="HTTP 400"):
+        with pytest.raises(EmbeddingError, match="HTTP 400") as error:
             embedder(recorder).embed(["x"], "document")
         assert len(recorder.requests) == 1
+        # Lo que responde el servicio llegaría al agente como un aviso de Vigente.
+        assert "modelo desconocido" not in error.value.message
 
     @pytest.mark.parametrize(
         "body",
@@ -117,12 +130,48 @@ class TestErrors:
             {"data": [{"embedding": [0.0, 0.0, 0.0]}]},
             {"data": [[0.1, 0.2]]},
             {"data": {"a": 1}},
+            {"data": [{"embedding": [10**400]}]},
+            {"data": [{"embedding": [1e300]}]},  # infinito al guardarlo como float32
+            {"data": [{"embedding": [3e38, 1.0]}]},  # y su cuadrado, al calcular distancias
+            {"data": [{"embedding": [1e-60, 1e-60]}]},
+            {"data": [{"embedding": [1.0], "index": float("inf")}]},
+            {"data": [{"embedding": [1.0] * 9000}]},
         ],
     )
     def test_rejects_malformed_responses(self, body: object) -> None:
         recorder = Recorder(httpx.Response(200, content=json.dumps(body).encode()))
         with pytest.raises(EmbeddingError):
             embedder(recorder).embed(["x"], "document")
+
+    def test_rejects_what_cannot_be_read(self) -> None:
+        with pytest.raises(EmbeddingError):
+            deep = httpx.Response(200, content=b"[" * 100_000)
+            embedder(Recorder(deep)).embed(["x"], "document")
+
+    def test_an_endless_response_is_cut(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(embeddings, "MAX_RESPONSE_BYTES", 1000)
+        with pytest.raises(EmbeddingError):
+            embedder(Recorder(httpx.Response(200, content=b" " * 2000))).embed(["x"], "document")
+
+    def test_a_compressed_response_is_never_unpacked(self) -> None:
+        bomb = httpx.Response(200, headers={"content-encoding": "gzip"}, stream=Raw(b"x"))
+        recorder = Recorder(bomb)
+        with pytest.raises(EmbeddingError):
+            embedder(recorder).embed(["x"], "document")
+        assert recorder.requests[0].headers["accept-encoding"] == "identity"
+
+    def test_a_response_that_never_ends_is_given_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(embeddings, "READ_DEADLINE", -1.0)
+        with pytest.raises(EmbeddingError, match="espera"):
+            embedder(Recorder(*[httpx.Response(200, content=b"{}")] * 3)).embed(["x"], "document")
+
+    def test_a_password_in_the_address_is_not_shown(self) -> None:
+        for failure in (httpx.ConnectError("refused"), httpx.ReadTimeout("lento")):
+            url = "http://svc:" + "unaclave" + "@127.0.0.1:11434/v1?k=unaclave"
+            with pytest.raises(EmbeddingError) as error:
+                embedder(Recorder(*[failure] * 3), base_url=url).embed(["x"], "document")
+            assert "unaclave" not in error.value.message
+            assert "127.0.0.1:11434/v1" in error.value.message
 
     def test_rejects_vectors_of_different_sizes(self) -> None:
         body = {"data": [{"embedding": [1.0, 2.0]}, {"embedding": [1.0]}]}
@@ -135,7 +184,7 @@ class TestPrivacy:
     @pytest.mark.parametrize(
         "url",
         [
-            "http://localhost:11434/v1",
+            "http://127.0.0.1:11434/v1",
             "http://127.0.0.1:1234/v1",
             "http://[::1]:8080/v1",
             "http://ollama.localhost/v1",
@@ -194,7 +243,7 @@ class TestSettings:
     def test_defaults_to_the_local_model(self) -> None:
         settings = EmbeddingSettings.from_env({})
         assert settings.model == DEFAULT_EMBED_MODEL
-        assert settings.base_url == "http://localhost:11434/v1"
+        assert settings.base_url == "http://127.0.0.1:11434/v1"
         assert not settings.allow_remote
         assert settings.api_key is None
 
