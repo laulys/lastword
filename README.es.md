@@ -24,7 +24,7 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 
 ![Una sesión real de la CLI: un hecho cambia, Lastword propone el reemplazo y la búsqueda devuelve lo vigente ahora o en una fecha pasada](demo/lastword.gif)
 
-<sub>Sesión real, grabada por [`demo/record.py`](demo/record.py) con el modelo de embeddings en marcha.</sub>
+<sub>Sesión real, grabada por [`demo/record.py`](demo/record.py) con el modelo de embeddings en marcha. Está en inglés; la CLI sigue el idioma del sistema, español o inglés, o `LASTWORD_LANG`.</sub>
 
 ## Resultados
 

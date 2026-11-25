@@ -62,7 +62,7 @@ def main() -> None:
         env = inherited | {
             "LASTWORD_DB": str(Path(tmp) / "demo.db"),
             "LASTWORD_WORKSPACE": "demo",
-            "LASTWORD_LANG": "es",  # la demo está en español, sea cual sea el idioma del sistema
+            "LASTWORD_LANG": "en",  # en inglés, como el README, sea cual sea el idioma del sistema
             "COLUMNS": str(COLS),
             "FORCE_COLOR": "1",
             "TERM": "xterm-256color",
@@ -86,7 +86,7 @@ def main() -> None:
             return output
 
         def saved_id(output: str) -> str:
-            match = re.search(r"Guardada\S*\s+(?:\x1b\[[0-9;]*m)*([0-9A-Z]{26})", output)
+            match = re.search(r"Saved\S*\s+(?:\x1b\[[0-9;]*m)*([0-9A-Z]{26})", output)
             assert match, output
             return match.group(1)
 
@@ -95,25 +95,25 @@ def main() -> None:
         old = saved_id(
             command(
                 "add",
-                "El proyecto usa PostgreSQL 15 como base de datos",
+                "The project uses PostgreSQL 15 as its database",
                 "--valid-from",
                 "2026-03-01",
             )
         )
         comment("Months later, a change that shares no words with it")
-        new = saved_id(command("add", "Migramos a SQLite para el MVP"))
+        new = saved_id(command("add", "We moved to SQLite for our MVP"))
         cast.wait(1.5)
 
         cast.out(CLEAR, 0.2)
         comment("Link them: the old fact closes, but stays in history")
         command("supersede", old, "--by", new)
         comment("Search returns only what is still true")
-        command("search", "¿qué base de datos usamos?", "-k", "2")
+        command("search", "which database do we use?", "-k", "2")
         cast.wait(1.0)
 
         cast.out(CLEAR, 0.2)
         comment("...and what was true at any past date")
-        command("search", "¿qué base de datos usamos?", "-k", "2", "--as-of", "2026-06-01")
+        command("search", "which database do we use?", "-k", "2", "--as-of", "2026-06-01")
         comment("The full story of the fact")
         command("history", new)
         cast.wait(2.0)

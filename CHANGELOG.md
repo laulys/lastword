@@ -10,6 +10,7 @@ What changed in each version of Lastword, called Vigente until 1.4. Each one has
 - What is already set up keeps working: the commands `vigente` and `vigente-mcp`, the `VIGENTE_*` variables, and the memory in `~/.vigente`, which is used where it is when there is no new one. If both names are set, the new one wins.
 - To upgrade an installed Vigente, uninstall it first: `uv tool uninstall vigente`, then install. The other way round, uninstalling would remove the `vigente` commands that Lastword also provides.
 - The Python package is imported as `lastword`. `import vigente` no longer works.
+- The demo is in English.
 
 ## 1.4.0 · 2026-11-25
 

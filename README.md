@@ -24,7 +24,7 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 
 ![A real CLI session: a fact changes, Lastword proposes the replacement, and search returns what is true now or at a past date](demo/lastword.gif)
 
-<sub>A real session, recorded by [`demo/record.py`](demo/record.py) with the embedding model running. It is in Spanish; the CLI follows the system language, English or Spanish, or `LASTWORD_LANG`.</sub>
+<sub>A real session, recorded by [`demo/record.py`](demo/record.py) with the embedding model running. The CLI follows the system language, English or Spanish, or `LASTWORD_LANG`.</sub>
 
 ## Results
 
