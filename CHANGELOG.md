@@ -1,10 +1,19 @@
 # Changelog
 
-What changed in each version of Vigente. Each one has its [release notes](https://github.com/laulys/vigente/releases), with measurements and upgrade instructions.
+What changed in each version of Lastword, called Vigente until 1.4. Each one has its [release notes](https://github.com/laulys/lastword/releases), with measurements and upgrade instructions.
+
+## Unreleased
+
+**Changed**
+
+- The project is now called **Lastword**. The package, the commands (`lastword`, `lastword-mcp`), the variables (`LASTWORD_*`) and the default file (`~/.lastword/lastword.db`) take the new name.
+- What is already set up keeps working: the commands `vigente` and `vigente-mcp`, the `VIGENTE_*` variables, and the memory in `~/.vigente`, which is used where it is when there is no new one. If both names are set, the new one wins.
+- To upgrade an installed Vigente, uninstall it first: `uv tool uninstall vigente`, then install. The other way round, uninstalling would remove the `vigente` commands that Lastword also provides.
+- The Python package is imported as `lastword`. `import vigente` no longer works.
 
 ## 1.4.0 · 2026-11-25
 
-Who may change a fact, and the fixes from a security review ([pull request](https://github.com/laulys/vigente/pull/12)).
+Who may change a fact, and the fixes from a security review ([pull request](https://github.com/laulys/lastword/pull/12)).
 
 **Added**
 
@@ -34,7 +43,7 @@ From a security review ([details](docs/decisions/0011-quien-puede-cambiar-un-hec
 
 ## 1.3.1 · 2026-11-18
 
-Documentation only; the code does not change ([pull request](https://github.com/laulys/vigente/pull/10)).
+Documentation only; the code does not change ([pull request](https://github.com/laulys/lastword/pull/10)).
 
 - The README presents memory security next to supersession: why it matters (OWASP ASI06) and what Vigente does on save, plus a new security and privacy section.
 - The README lists what is new since 1.0, with the version of each change, and every CLI command.
@@ -42,7 +51,7 @@ Documentation only; the code does not change ([pull request](https://github.com/
 
 ## 1.3.0 · 2026-11-18
 
-Fixes from a full audit of the code ([pull request](https://github.com/laulys/vigente/pull/9)).
+Fixes from a full audit of the code ([pull request](https://github.com/laulys/lastword/pull/9)).
 
 **Added**
 

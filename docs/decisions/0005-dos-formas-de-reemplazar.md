@@ -36,6 +36,6 @@ Reglas del enlace, comprobadas dentro de la transacción:
 ## Consecuencias
 
 - ✅ Ningún hecho queda duplicado. El caso habitual cuesta una llamada (`remember`) y el reemplazo, dos.
-- ✅ La CLI tiene el mismo flujo: `vigente supersede <id> --by <id>`.
+- ✅ La CLI tiene el mismo flujo: `lastword supersede <id> --by <id>`.
 - ⚠️ Una herramienta con dos modos. Se valida que llegue exactamente uno de los dos, y el error lo explica.
 - ⚠️ Las cadenas son lineales: una versión nueva reemplaza a un solo hecho. «Ana y Luis se mudaron a Lisboa» no puede cerrar dos hechos a la vez. Queda documentado como limitación.

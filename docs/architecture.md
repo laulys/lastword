@@ -1,10 +1,10 @@
-# Vigente — Arquitectura
+# Lastword — Arquitectura
 
 Estado: **aprobada** (18-11-2026). Los cinco hitos del plan original están implementados, y el hito 6 añade seguridad (§11). Lo marcado con *(Hito N)* recoge lo que se aprendió al implementar ese hito.
 
 ## 1. Resumen
 
-Vigente es un servidor MCP local que da memoria persistente a agentes de IA y separa lo que **sigue siendo verdad** de lo que **fue verdad**. Los hechos no se editan ni se borran cuando cambian: se reemplazan con una cadena enlazada y fechas de validez. Por defecto la búsqueda solo devuelve lo vigente, y con `as_of` devuelve lo que era verdad en una fecha.
+Lastword es un servidor MCP local que da memoria persistente a agentes de IA y separa lo que **sigue siendo verdad** de lo que **fue verdad**. Los hechos no se editan ni se borran cuando cambian: se reemplazan con una cadena enlazada y fechas de validez. Por defecto la búsqueda solo devuelve lo vigente, y con `as_of` devuelve lo que era verdad en una fecha.
 
 Todo vive en un único archivo SQLite: filas, índice de texto (FTS5) e índice vectorial (sqlite-vec). Así cualquier escritura o borrado es **una sola transacción** sobre los tres.
 
@@ -53,7 +53,7 @@ Los puntos 4 y 5 determinan reglas del diseño (ver §4 y ADR-0001).
 - `Embedder` es la única interfaz abstracta. Tiene dos implementaciones reales: la compatible con OpenAI y `FakeEmbedder` para tests.
 - *(Hito 2)* Cada familia de modelos tiene un `ModelProfile`: el formato de entrada que espera según el uso (documento guardado, pregunta, comparación) y sus umbrales calibrados. Si no se respeta el formato, la calidad cae sin dar ningún error.
 - *(Hito 2)* Los embeddings se calculan **fuera** de las transacciones: son llamadas de red y no deben bloquear la base de datos.
-- *(v1.2)* Lo que lee una persona (la CLI, los errores, los avisos, `vigente doctor` y el arranque de `vigente-mcp`) pasa por `tr()` de `i18n.py`: el texto fuente está en español y hay un catálogo en inglés. El idioma sale de `VIGENTE_LANG` o del sistema. Lo que lee el agente (instrucciones y descripciones MCP) se queda en español. Un test comprueba que cada texto tiene traducción con los mismos huecos.
+- *(v1.2)* Lo que lee una persona (la CLI, los errores, los avisos, `lastword doctor` y el arranque de `lastword-mcp`) pasa por `tr()` de `i18n.py`: el texto fuente está en español y hay un catálogo en inglés. El idioma sale de `LASTWORD_LANG` o del sistema. Lo que lee el agente (instrucciones y descripciones MCP) se queda en español. Un test comprueba que cada texto tiene traducción con los mismos huecos.
 
 ## 4. Esquema SQL
 
@@ -140,11 +140,11 @@ CREATE TABLE vecx_1 (
 
 **Por qué `seq` además del ULID** *(Hito 1)*: el índice FTS se enlaza por número de fila. En tablas sin `INTEGER PRIMARY KEY`, `VACUUM` puede renumerar el rowid implícito, y eso desincronizaría el índice en silencio. `seq` es un alias explícito y estable; `id` sigue siendo el identificador público.
 
-**Por qué hay columnas duplicadas en `vecb_N`:** `kind`, `valid_from` y `valid_to` se repiten ahí para que el filtro ocurra dentro del KNN (§2.1). *(Hito 2)* No hace falta `status`, porque la vigencia se decide por fechas (§5). Se mantienen sincronizadas en la misma transacción que `memories`, y `vigente doctor` comprueba que coincidan y que no haya vectores huérfanos.
+**Por qué hay columnas duplicadas en `vecb_N`:** `kind`, `valid_from` y `valid_to` se repiten ahí para que el filtro ocurra dentro del KNN (§2.1). *(Hito 2)* No hace falta `status`, porque la vigencia se decide por fechas (§5). Se mantienen sincronizadas en la misma transacción que `memories`, y `lastword doctor` comprueba que coincidan y que no haya vectores huérfanos.
 
 *(Hito 2)* **Borrar un vector también lo borra del disco:** sqlite-vec sobrescribe el vector dentro de su bloque al borrarlo y, con `secure_delete`, no quedan restos. Un test busca en el archivo los bytes del vector exacto y los de su copia binaria, antes y después de `forget`. Importa porque un embedding puede revelar información del texto original.
 
-**Invariante comprobada por tests y por `vigente doctor`:** el conjunto de ids de `memories`, `memories_fts` y el espacio vectorial activo es el mismo (salvo memorias sin embedding), y cada vector binario tiene su pareja exacta.
+**Invariante comprobada por tests y por `lastword doctor`:** el conjunto de ids de `memories`, `memories_fts` y el espacio vectorial activo es el mismo (salvo memorias sin embedding), y cada vector binario tiene su pareja exacta.
 
 ## 5. Reglas de dominio
 
@@ -165,7 +165,7 @@ CREATE TABLE vecx_1 (
   - Un test lo verifica buscando el texto en los bytes del archivo, con control previo de que estaba ahí.
   - Coste: `optimize` reescribe el índice entero. Se medirá en el Hito 4.
 - **Tiempo de registro y tiempo de validez son distintos.** `created_at` dice cuándo lo supimos; `valid_from`/`valid_to` dicen cuándo fue verdad. `as_of` consulta el tiempo de validez. Ejemplo: «me mudé a Lisboa en marzo», dicho en mayo, tiene `valid_from = marzo` y `created_at = mayo`.
-- **Aislamiento.** El workspace lo fija la configuración del servidor (`VIGENTE_WORKSPACE`). No es un parámetro de las herramientas MCP. Todas las consultas de `store.py` lo exigen como argumento obligatorio.
+- **Aislamiento.** El workspace lo fija la configuración del servidor (`LASTWORD_WORKSPACE`). No es un parámetro de las herramientas MCP. Todas las consultas de `store.py` lo exigen como argumento obligatorio.
 
 ## 6. Recuperación
 
@@ -173,7 +173,7 @@ CREATE TABLE vecx_1 (
 2. **FTS:** `memories_fts` unida a `memories` con los filtros de workspace, vigencia o `as_of`, y `kind`. *(Hito 4)* La unión es un `CROSS JOIN` para obligar a SQLite a recorrer primero el índice FTS. Con un `JOIN` normal, el planificador elegía recorrer `memories` por su índice y ejecutar la búsqueda de texto una vez por fila, con coste cuadrático: 432 ms con 2.000 memorias frente a 1,9 ms después, con los mismos resultados. Lo encontró el benchmark de escala, y un test comprueba el plan de la consulta. Se piden `max(k × 4, 20)` candidatos, con un máximo de 200.
 3. **Vector:** se calcula el embedding de la consulta con el formato de pregunta del modelo. *(v1.2)* La búsqueda tiene dos pasos ([ADR-0010](decisions/0010-busqueda-en-dos-pasos.md)): un KNN sobre los vectores binarios de `vecb_N`, con los mismos filtros dentro, elige al menos 100 candidatos, y se reordenan con los vectores exactos de `vecx_N`. Con menos de 100 memorias que pasen los filtros, el resultado es exacto. Mismo número de candidatos finales.
 4. **Fusión RRF** (solo en modo híbrido): `score(d) = Σ 1 / (60 + rank_i(d))`. Solo usa posiciones, así que no hace falta normalizar BM25 y coseno, que están en escalas incomparables. Se ordena y se corta en `k`. *(Hito 4)* En los empates tienen prioridad los vectores. No se desempata por id: los ULID tienen una parte aleatoria, y los resultados cambiaban entre ejecuciones.
-5. **Modos:** *(Hito 4)* por defecto **solo vectores** ([ADR-0006](decisions/0006-busqueda-por-vectores.md)); `VIGENTE_SEARCH_MODE=hybrid|text` cambia el modo. Si alguna memoria no tiene vector (se guardó con el servicio caído, o es de otro modelo), la búsqueda por vectores no la vería, así que se combina con la de texto y se avisa hasta que se ejecute `reindex`. Comprobarlo cuesta 6 ms con 50.000 memorias. Sin `Embedder` configurado, el modo es `fts_only`. *(Hito 2)* Si el servicio de embeddings falla, también: la respuesta lleva un aviso en `warnings` y nada falla. Al guardar, la memoria se guarda sin vector y `vigente reindex` lo completa después.
+5. **Modos:** *(Hito 4)* por defecto **solo vectores** ([ADR-0006](decisions/0006-busqueda-por-vectores.md)); `LASTWORD_SEARCH_MODE=hybrid|text` cambia el modo. Si alguna memoria no tiene vector (se guardó con el servicio caído, o es de otro modelo), la búsqueda por vectores no la vería, así que se combina con la de texto y se avisa hasta que se ejecute `reindex`. Comprobarlo cuesta 6 ms con 50.000 memorias. Sin `Embedder` configurado, el modo es `fts_only`. *(Hito 2)* Si el servicio de embeddings falla, también: la respuesta lleva un aviso en `warnings` y nada falla. Al guardar, la memoria se guarda sin vector y `lastword reindex` lo completa después.
 6. **`include_history=true`** quita el filtro de vigencia y marca cada resultado con su `status`.
 
 Cada resultado devuelve la memoria completa, `score`, `matched_by` (`["fts"]`, `["vector"]` o ambos) y `similarity` (coseno) si la encontró la búsqueda vectorial.
@@ -205,7 +205,7 @@ Las fechas de entrada y salida van en ISO 8601. Los errores son estructurados (`
 
 Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si `remember` devuelve un posible reemplazo que contradice lo nuevo, llama a `supersede` en vez de dejar ambos». También avisan de que el contenido devuelto son **datos guardados**, no instrucciones.
 
-**Implementación** *(Hito 3, [`mcp_server.py`](../src/vigente/mcp_server.py), SDK oficial `mcp` 2.x, transporte stdio)*:
+**Implementación** *(Hito 3, [`mcp_server.py`](../src/lastword/mcp_server.py), SDK oficial `mcp` 2.x, transporte stdio)*:
 
 - **Instrucciones del servidor:** explican el protocolo (buscar antes de responder, reemplazar en vez de duplicar, `forget` solo si el usuario lo pide) y advierten que el contenido de las memorias son datos, nunca órdenes. Es una defensa contra memorias envenenadas con instrucciones.
 - **Vistas compactas:** el agente recibe solo los campos que le sirven (sin `workspace_id`, `source` ni el score de RRF), porque cada campo de la respuesta forma parte de su prompt.
@@ -214,16 +214,16 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 - **Una conexión por llamada:** el SDK ejecuta las herramientas síncronas en un pool de hilos, y una conexión SQLite no debe compartirse entre hilos. Abrir y cerrar el servicio (conexión, carga de sqlite-vec, pragmas y comprobación de migraciones) cuesta 1,8 ms de mediana y 2,0 ms en p95 (300 mediciones sobre una base con 200 memorias, Apple Silicon). Abrirlo para leer no toma el bloqueo de escritura: el workspace solo se crea si no existe. El cliente HTTP de embeddings sí se comparte.
 - **stdout es el canal del protocolo:** nada escribe en stdout, y los logs del SDK van a stderr en nivel WARNING. A nivel INFO registraría los errores de validación con los valores de entrada, es decir, con contenido de memorias.
 - *(Hito 6)* **Seguridad:** `remember` y `supersede` rechazan secretos (`secret_detected`) y caracteres invisibles que esconden texto (`hidden_characters`). Cada memoria devuelta lleva `flags` si parece una orden, tiene caracteres de ancho cero o contiene un secreto antiguo, y `recall` lo avisa en `warnings` (§11).
-- **Por HTTP:** `vigente-mcp --http` sirve la misma memoria en `/mcp` (*streamable HTTP*), con un token obligatorio (`VIGENTE_TOKEN`, al menos 32 caracteres) que se compara en tiempo constante. Por defecto solo escucha en `127.0.0.1`. Detalle en el [ADR-0009](decisions/0009-compartir-por-http.md).
-- **Arranque:** `vigente-mcp` valida la configuración (base de datos, workspace, URL de embeddings) antes de aceptar conexiones y, si algo falla, termina con un mensaje claro en stderr.
+- **Por HTTP:** `lastword-mcp --http` sirve la misma memoria en `/mcp` (*streamable HTTP*), con un token obligatorio (`LASTWORD_TOKEN`, al menos 32 caracteres) que se compara en tiempo constante. Por defecto solo escucha en `127.0.0.1`. Detalle en el [ADR-0009](decisions/0009-compartir-por-http.md).
+- **Arranque:** `lastword-mcp` valida la configuración (base de datos, workspace, URL de embeddings) antes de aceptar conexiones y, si algo falla, termina con un mensaje claro en stderr.
 
-**Prueba con un agente real** *(Hito 3, [informe](../eval/results/agent_demo.md), `eval/agent_demo.py`)*. Cuatro sesiones independientes de Claude Code, que solo tienen las herramientas de Vigente. Ejecutada dos veces, con el mismo comportamiento las dos:
+**Prueba con un agente real** *(Hito 3, [informe](../eval/results/agent_demo.md), `eval/agent_demo.py`)*. Cuatro sesiones independientes de Claude Code, que solo tienen las herramientas de Lastword. Ejecutada dos veces, con el mismo comportamiento las dos:
 
 - El agente **busca antes de guardar**, aunque nadie se lo pida en el mensaje.
 - Usa **los dos flujos de reemplazo** del ADR-0005. Cuando sabe qué cambia, hace `recall` y luego `supersede` con `new_content`. Cuando no, hace `remember`, recibe la propuesta y la enlaza con `supersede` con `new_id`.
 - **Rellena `valid_from` con una fecha futura** cuando el usuario anuncia un cambio («desde la semana que viene»). El hecho anterior sigue vigente hasta esa fecha.
 - **Escribe un `reason` útil**, y en una sesión posterior lo usa para explicar qué había antes.
-- Hallazgo de la prueba: si Claude Code tiene disponible su memoria de archivos, el agente también la usa y **duplica lo guardado en otro sistema que no sabe de reemplazos**. Para medir Vigente de forma aislada, la demo quita las herramientas propias de Claude Code (`--tools ""`). Para un usuario real es un aviso que conviene poner en el README del hito 5.
+- Hallazgo de la prueba: si Claude Code tiene disponible su memoria de archivos, el agente también la usa y **duplica lo guardado en otro sistema que no sabe de reemplazos**. Para medir Lastword de forma aislada, la demo quita las herramientas propias de Claude Code (`--tools ""`). Para un usuario real es un aviso que conviene poner en el README del hito 5.
 
 ## 8. Plan de evaluación
 
@@ -231,7 +231,7 @@ Las descripciones de las herramientas indican cuándo usarlas, por ejemplo: «si
 
 *(Hito 4)* **Ejecutado.** El protocolo definitivo, con las reglas fijadas antes de medir, está en [`eval/README.md`](../eval/README.md). Los resultados:
 
-- **E1:** la tesis se sostiene. Con la memoria ingenua, el primer resultado es una versión obsoleta en el 51% de las preguntas con búsqueda por vectores, el 44% con la híbrida y el 33% solo con texto; con Vigente, en el 0%. Recall@5 no empeora, sino que sube a 100%.
+- **E1:** la tesis se sostiene. Con la memoria ingenua, el primer resultado es una versión obsoleta en el 51% de las preguntas con búsqueda por vectores, el 44% con la híbrida y el 33% solo con texto; con Lastword, en el 0%. Recall@5 no empeora, sino que sube a 100%.
 - **E2 (LongMemEval):** sin reemplazos, en las preguntas de actualización la versión vieja sale antes que la nueva en torno a la mitad de las veces.
 - **Decisiones:** búsqueda por vectores por defecto, y el umbral se mantiene en 0.51 ([decisiones](../eval/results/decisions.md)).
 - **Escala:** [medida](../eval/results/scale.md) hasta 200.000 memorias.
@@ -255,7 +255,7 @@ Lo que sigue de esta sección es el plan original.
 ### Común a ambos
 
 - **Latencia:** p50 y p95 de `recall` y de escritura, y tiempo de indexación, con el hardware y las versiones de los modelos anotados.
-- **Salida:** tabla en Markdown y un gráfico, generados por `vigente eval`. Los resultados se publican tal como salgan.
+- **Salida:** tabla en Markdown y un gráfico, generados por `lastword eval`. Los resultados se publican tal como salgan.
 
 ## 9. Decisiones (aprobadas el 18-11-2026)
 
@@ -263,7 +263,7 @@ Lo que sigue de esta sección es el plan original.
 2. **Los `episode` son inmutables** y no se pueden reemplazar.
 3. **E2b (agente simulado con qwen3:8b)** queda como opcional para el Hito 4. *(Hito 4)* Se dejó fuera: llevaría horas de cómputo y mediría sobre todo al modelo local. El protocolo con un agente real ya está demostrado en la demo del Hito 3.
 4. **Modelo de embeddings:** se compararon `qwen3-embedding:0.6b` y `embeddinggemma` con un mini-benchmark propio. Elegido: **embeddinggemma** ([ADR-0004](decisions/0004-modelo-de-embeddings.md)). *(Hito 2)*
-5. **Nombre «vigente».**
+5. **Nombre «vigente».** *(después de la v1.4)* Pasa a ser **Lastword**: la última palabra es lo último que es verdad, y también quién decide. «Vigente» sigue usándose en español como adjetivo, para lo que rige ahora.
 6. **Git:** propongo `git init` al empezar el Hito 1 y un commit por hito, con tu autorización en cada uno.
 
 ## 10. Riesgos
@@ -271,16 +271,16 @@ Lo que sigue de esta sección es el plan original.
 | Riesgo | Mitigación |
 |---|---|
 | sqlite-vec es pre-1.0 (v0.1.9) | Versión fijada; tests de integración contra la extensión real |
-| Filas fantasma tras un insert fallido | Transacción explícita en toda escritura; validación con Pydantic antes de llegar a SQL; `vigente doctor` |
+| Filas fantasma tras un insert fallido | Transacción explícita en toda escritura; validación con Pydantic antes de llegar a SQL; `lastword doctor` |
 | `NULL` no permitido en metadatos | Centinela 31-12-9999, convertido solo en `store.py` |
 | Sintaxis FTS5 en consultas del usuario | Tokenizar y citar cada token |
 | Mezcla de español e inglés | `unicode61` sin stemming; modelo de embeddings multilingüe |
 | El agente puede no llamar a `supersede` | Descripciones claras de las herramientas; se mide en E2b; se documenta como limitación |
 | KNN de sqlite-vec es exacto (fuerza bruta) | *(Hito 4)* Medido: crecía de forma lineal, 64 ms con 50.000 memorias. *(v1.2)* Búsqueda en dos pasos, binaria y luego exacta: 7 ms con 50.000 y 25 ms con 200.000, sin cambiar los resultados de E1 ni de E2. Sigue siendo lineal: con millones haría falta un índice aproximado (ADR-0010) |
-| Memoria envenenada o secretos guardados *(Hito 6)* | Se rechazan los secretos y los caracteres invisibles al guardar; las órdenes se marcan al leer, `recall` avisa y `vigente review` las lista. Las reglas no paran a un atacante que las conozca (ADR-0007) |
+| Memoria envenenada o secretos guardados *(Hito 6)* | Se rechazan los secretos y los caracteres invisibles al guardar; las órdenes se marcan al leer, `recall` avisa y `lastword review` las lista. Las reglas no paran a un atacante que las conozca (ADR-0007) |
 | Varios clientes (CLI, Claude Code, Codex, Cursor) sobre el mismo archivo | WAL + `busy_timeout`. *(v1.0.1)* Al crear la base a la vez fallaba el 57% de las aperturas; el paso a WAL se reintenta y un test lo comprueba con cuatro procesos. Probado también con tres servidores MCP escribiendo a la vez |
-| Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `vigente reindex` completa lo pendiente |
-| Enviar memorias a un servicio remoto sin querer *(Hito 2)* | Toda URL no local se rechaza salvo con `VIGENTE_ALLOW_REMOTE=1`; la clave de API solo llega por entorno |
+| Servicio de embeddings caído *(Hito 2)* | La memoria se guarda sin vector, la búsqueda cae a solo texto con aviso y `lastword reindex` completa lo pendiente |
+| Enviar memorias a un servicio remoto sin querer *(Hito 2)* | Toda URL no local se rechaza salvo con `LASTWORD_ALLOW_REMOTE=1`; la clave de API solo llega por entorno |
 | Umbral de reemplazos frágil *(Hito 2)* | Calibrado con solo 18 casos y margen estrecho (ADR-0004). *(Hito 4)* Recalibrado con E1 y validado aparte: se mantiene 0.51, porque el umbral calibrado con plantillas no generalizaba |
 | Rendimiento que solo se ve con muchos datos *(Hito 4)* | El benchmark de escala encontró una búsqueda de texto con coste cuadrático (§6); un test comprueba el plan de la consulta |
 | Resultados de evaluación no reproducibles *(Hito 4)* | El desempate de RRF dependía de ids aleatorios; corregido, y las evaluaciones se ejecutaron dos veces con resultados idénticos |
@@ -290,10 +290,10 @@ Lo que sigue de esta sección es el plan original.
 
 Qué se decidió y qué alternativas se descartaron está en el [ADR-0007](decisions/0007-seguridad-de-la-memoria.md). Aquí, cómo encaja:
 
-- **[`safety.py`](../src/vigente/safety.py)** reúne las reglas: expresiones regulares y una medida de entropía, sin dependencias ni LLM.
+- **[`safety.py`](../src/lastword/safety.py)** reúne las reglas: expresiones regulares y una medida de entropía, sin dependencias ni LLM.
 - **Al guardar,** `service.remember` y `service.supersede` comprueban el contenido, la fuente, el motivo y las etiquetas antes de calcular el embedding. Los secretos y los caracteres *tag* o bidireccionales, los selectores de variación fuera de sitio y los códigos de terminal se rechazan. Solo la CLI pasa `allow_secrets`; el servidor MCP no tiene forma de hacerlo.
 - **Al leer,** `Memory.flags` es un campo calculado, no una columna: cubre las memorias anteriores sin migrar la base, y las reglas pueden mejorar sin reescribir datos.
-- **Coste medido:** unos 13 µs por memoria al guardar y unos 25 µs por memoria leída. `vigente review` recorre el workspace entero, así que con 50.000 memorias rondaría el segundo (estimación, no medida).
+- **Coste medido:** unos 13 µs por memoria al guardar y unos 25 µs por memoria leída. `lastword review` recorre el workspace entero, así que con 50.000 memorias rondaría el segundo (estimación, no medida).
 - **Evaluación:** E3 ([informe](../eval/results/e3_security.md)), con casos y reglas fijados antes de escribir los detectores, y una comprobación con los mensajes reales de LongMemEval que llevó a corregir la regla de tokens.
 - E2 guarda los mensajes de LongMemEval con `allow_secrets`: mide la búsqueda, no los filtros, y así sus resultados no cambian.
 - *(v1.4)* **Quién puede cambiar un hecho** ([ADR-0011](decisions/0011-quien-puede-cambiar-un-hecho.md)). `memories.origin` dice de quién viene cada memoria y lo fija la interfaz: la CLI abre el servicio como persona y el servidor MCP, como agente. `pending_changes` guarda los cambios que esperan a una persona: no son memorias, así que ninguna búsqueda los ve, y su texto nunca se cita en un aviso. `contradictions` une dos memorias vigentes parecidas de distinto origen: `recall` no devuelve la menos fiable sin la otra.

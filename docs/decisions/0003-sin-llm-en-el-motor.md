@@ -5,7 +5,7 @@
 
 ## Contexto
 
-Detectar que «migramos a SQLite» reemplaza a «usamos PostgreSQL» requiere entender el lenguaje. Otros sistemas de memoria resuelven esto llamando a un LLM dentro del motor en cada escritura. Pero quien usa Vigente por MCP **ya es un LLM**.
+Detectar que «migramos a SQLite» reemplaza a «usamos PostgreSQL» requiere entender el lenguaje. Otros sistemas de memoria resuelven esto llamando a un LLM dentro del motor en cada escritura. Pero quien usa Lastword por MCP **ya es un LLM**.
 
 ## Decisión
 

@@ -1,6 +1,6 @@
 # Latencia y escala
 
-Generado por `eval/scale.py`. Vectores aleatorios de 768 dimensiones (las de embeddinggemma): mide el coste de Vigente sin el del modelo de embeddings.
+Generado por `eval/scale.py`. Vectores aleatorios de 768 dimensiones (las de embeddinggemma): mide el coste de Lastword sin el del modelo de embeddings.
 
 - Fecha: 2026-11-18
 - Máquina: arm64, Darwin 25.5.0, Python 3.12.16

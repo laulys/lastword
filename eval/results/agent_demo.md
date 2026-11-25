@@ -1,6 +1,6 @@
 # Demo con un agente real
 
-Generado por `eval/agent_demo.py`. Cuatro sesiones **independientes** de Claude Code (cada una es un proceso nuevo, sin memoria de las anteriores) que solo comparten Vigente. El agente no tiene más herramientas que las de Vigente.
+Generado por `eval/agent_demo.py`. Cuatro sesiones **independientes** de Claude Code (cada una es un proceso nuevo, sin memoria de las anteriores) que solo comparten Lastword. El agente no tiene más herramientas que las de Lastword.
 
 - Fecha: 2026-11-18
 - 2.1.236 (Claude Code), modelo `claude-fable-5`
@@ -82,4 +82,4 @@ Búsqueda «¿A qué hora es el daily?» (resultado principal):
 - Hoy: La reunión diaria del equipo es a las 9:30.
 - Dentro de 7 días: El daily del equipo es a las 10:00 (cambio efectivo desde el lunes 23 de noviembre de 2026).
 
-`vigente doctor`: sin problemas
+`lastword doctor`: sin problemas

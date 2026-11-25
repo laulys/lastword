@@ -69,7 +69,7 @@ LongMemEval tiene 72 preguntas de actualización; en 2 no hay dos mensajes del u
 | LongMemEval (70) | reenlazar dos hechos de la persona | 69 |
 | LongMemEval (70) | `forget` y `remember` | 70 |
 
-Es el límite conocido: el mismo origen no protege. Una persona puede confirmar un hecho con `vigente confirm`, y entonces pasa a las tablas de arriba. Al reenlazar, el último hecho de cada conjunto no tiene otro con el que enlazarse.
+Es el límite conocido: el mismo origen no protege. Una persona puede confirmar un hecho con `lastword confirm`, y entonces pasa a las tablas de arriba. Al reenlazar, el último hecho de cada conjunto no tiene otro con el que enlazarse.
 
 ## Avisos de más
 

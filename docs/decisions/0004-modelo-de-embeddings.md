@@ -5,7 +5,7 @@
 
 ## Contexto
 
-Vigente usa embeddings para dos cosas:
+Lastword usa embeddings para dos cosas:
 
 1. Proponer posibles reemplazos al guardar un hecho nuevo, aunque no comparta palabras con el anterior («Migramos a SQLite» frente a «El proyecto usa PostgreSQL»).
 2. Buscar por significado.
@@ -14,7 +14,7 @@ Hacía falta un modelo local, multilingüe (el contenido mezcla español e ingl�
 
 ## Cómo se decidió
 
-Con un mini-benchmark propio, escrito antes de elegir y ejecutado con el código real de Vigente: [`eval/embedding_choice.py`](../../eval/embedding_choice.py) sobre [`eval/data/embedding_choice.json`](../../eval/data/embedding_choice.json). [Resultados completos](../../eval/results/embedding_choice.md).
+Con un mini-benchmark propio, escrito antes de elegir y ejecutado con el código real de Lastword: [`eval/embedding_choice.py`](../../eval/embedding_choice.py) sobre [`eval/data/embedding_choice.json`](../../eval/data/embedding_choice.json). [Resultados completos](../../eval/results/embedding_choice.md).
 
 El criterio para el umbral se fijó **antes** de ver los datos: el de mejor F1 y, si hay empate, el más alto.
 

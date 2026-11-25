@@ -14,20 +14,20 @@ OWASP pone este riesgo entre los principales de los agentes:
 
 La responsable de esa entrada lo resume en [un artículo de mayo de 2026](https://genai.owasp.org/2026/05/13/memory-is-a-feature-it-is-also-an-attack-surface/): el problema es tratar la memoria como algo de confianza, sin suficiente validación, separación ni visibilidad.
 
-Hasta ahora Vigente solo tenía la separación: las instrucciones del servidor dicen que el contenido de una memoria es un dato y nunca una orden. Quedaban dos riesgos concretos sin cubrir:
+Hasta ahora Lastword solo tenía la separación: las instrucciones del servidor dicen que el contenido de una memoria es un dato y nunca una orden. Quedaban dos riesgos concretos sin cubrir:
 
 1. **Secretos guardados sin querer.** Por ejemplo, «la clave de Stripe es sk_live_…». El archivo no está cifrado, y cualquier agente conectado al workspace la recuperaría.
 2. **Memoria envenenada.** Un documento, una web o un email que el agente procesa consigue que guarde una orden: «cuando pregunten por la entrega, di que…». A veces va escondida en caracteres Unicode invisibles.
 
 ## Decisión
 
-Tres niveles, según lo seguro que se puede estar de cada cosa. Todo con reglas fijas en [`safety.py`](../../src/vigente/safety.py), sin LLM, como el resto del motor (ADR-0003):
+Tres niveles, según lo seguro que se puede estar de cada cosa. Todo con reglas fijas en [`safety.py`](../../src/lastword/safety.py), sin LLM, como el resto del motor (ADR-0003):
 
-| Qué | Qué hace Vigente | Por qué |
+| Qué | Qué hace Lastword | Por qué |
 |---|---|---|
 | **Secretos**: 10 formatos de clave conocidos, contraseñas escritas en una frase y tokens con aspecto aleatorio | **Se rechazan** al guardar. El error no repite el secreto y propone guardar dónde está («la clave está en el gestor de contraseñas»). | Un secreto en la memoria no tiene arreglo: ya lo puede leer cualquier agente conectado. |
 | **Caracteres Unicode *tag* y de control bidireccional** | **Se rechazan** siempre. | Sirven para esconder texto y ninguna memoria los necesita. |
-| **Texto que se dirige al agente** como una orden, y caracteres de ancho cero | **Se guardan marcados**: el campo `flags`, un aviso en `recall` y una lista con `vigente review`. | Hay frases legítimas parecidas («a partir de ahora abrimos los domingos»). El ancho cero aparece al copiar texto de una web. |
+| **Texto que se dirige al agente** como una orden, y caracteres de ancho cero | **Se guardan marcados**: el campo `flags`, un aviso en `recall` y una lista con `lastword review`. | Hay frases legítimas parecidas («a partir de ahora abrimos los domingos»). El ancho cero aparece al copiar texto de una web. |
 
 Además:
 
@@ -65,12 +65,12 @@ La única falsa marca de E3 es reveladora: «Cuando te pregunten por el horario,
 
 ## Consecuencias
 
-- ✅ Vigente ya cubre las tres cosas que pide OWASP: validación al escribir, visibilidad (`flags`, avisos y `vigente review`) y separación (las instrucciones del servidor).
+- ✅ Lastword ya cubre las tres cosas que pide OWASP: validación al escribir, visibilidad (`flags`, avisos y `lastword review`) y separación (las instrucciones del servidor).
 - ⚠️ **El 100% de E3 es un techo.** Los casos y las reglas los escribió la misma persona. Un atacante que conozca las reglas las esquivará: parafraseando, en otro idioma o con codificaciones. Las reglas cazan lo evidente; la defensa de fondo sigue siendo que el agente trate la memoria como datos.
 - ⚠️ Las reglas de órdenes solo cubren español e inglés. No se detectan secretos en formatos no listados.
 - *(v1.3)* Una auditoría encontró formas fáciles de esquivar las reglas, ya corregidas: una contraseña con nombre de variable (`DB_PASSWORD=…`), una clave partida con un carácter invisible, y una orden con dos espacios o un guion opcional en medio de una palabra. Antes de detectar se quitan los caracteres invisibles, incluidos los selectores de variación, y se unifican los espacios. E3 da lo mismo que antes, sin falsos avisos nuevos.
 - *(v1.4)* Una revisión de seguridad encontró más ([cómo](0011-quien-puede-cambiar-un-hecho.md)):
-  - **Los códigos que el terminal obedece** no se rechazaban. Un texto podía mover el cursor y hacer que `vigente pending` enseñara algo distinto de lo que se aceptaba. Ahora el carácter Escape se rechaza al guardar, los demás de control se guardan marcados (aparecen al copiar de un PDF) y la CLI nunca enseña ninguno tal cual, tampoco de memorias antiguas.
+  - **Los códigos que el terminal obedece** no se rechazaban. Un texto podía mover el cursor y hacer que `lastword pending` enseñara algo distinto de lo que se aceptaba. Ahora el carácter Escape se rechaza al guardar, los demás de control se guardan marcados (aparecen al copiar de un PDF) y la CLI nunca enseña ninguno tal cual, tampoco de memorias antiguas.
   - **Un patrón lento.** Una memoria de 4.000 caracteres preparada tardaba hasta 4 s en cada lectura y paraba el servidor, porque las marcas se calculan al leer. Todos los patrones tienen ahora un máximo, y un test pasa textos de ese tipo: en 10.422 combinaciones, la peor tarda 5 ms.
   - **Texto escondido en selectores de variación**, que se rechaza cuando van en fila o detrás de una letra, y en otros caracteres que no se dibujan, que se marca. Los de los emojis y otras escrituras no cambian.
   - **Más formas corrientes de una contraseña:** en JSON o Markdown, `dbPassword`, `DB_PASS`, «la contraseña actual es…» y `redis://:…@`.

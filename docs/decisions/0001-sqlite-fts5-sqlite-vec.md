@@ -26,6 +26,6 @@ Necesitamos filas, búsqueda de texto y búsqueda vectorial. Además, «olvidar�
 - ✅ Filtro por workspace y vigencia dentro del KNN (verificado: partition key + columnas de metadatos).
 - ✅ Cero infraestructura: el usuario instala un paquete y tiene un archivo.
 - ⚠️ sqlite-vec es pre-1.0. Mitigación: versión fijada y tests de integración contra la extensión real.
-- ⚠️ Verificado: un insert que falla sin transacción deja una fila fantasma en vec0. La transacción explícita es obligatoria, no opcional. `vigente doctor` comprueba la consistencia.
+- ⚠️ Verificado: un insert que falla sin transacción deja una fila fantasma en vec0. La transacción explícita es obligatoria, no opcional. `lastword doctor` comprueba la consistencia.
 - ⚠️ Las columnas de metadatos no aceptan `NULL`: «vigente» se representa con el centinela 31-12-9999.
 - ⚠️ El KNN de sqlite-vec es exacto (fuerza bruta). Su coste se mide en el Hito 4 en vez de suponerlo.

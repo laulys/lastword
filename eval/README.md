@@ -14,9 +14,9 @@ Las reglas de decisión se fijaron **antes** de ejecutar los experimentos y los 
 - **Sistemas, con la misma búsqueda:**
   - **ingenua:** cada versión queda activa;
   - **ingenua + recencia:** reordena los 5 primeros por fecha;
-  - **Vigente:** cada versión reemplaza a la anterior. La ingesta es *oráculo*: se usa el reemplazo verdadero, para medir el mecanismo aislado de las decisiones del agente.
+  - **Lastword:** cada versión reemplaza a la anterior. La ingesta es *oráculo*: se usa el reemplazo verdadero, para medir el mecanismo aislado de las decisiones del agente.
 - **Métricas:** Recall@1, Recall@5, MRR y **tasa de obsoletos**: el primer resultado (o alguno de los cinco primeros) es otra versión del mismo dato.
-- **Regla de la tesis:** se sostiene si, con la búsqueda por defecto, Vigente baja la tasa de obsoletos en el primer resultado respecto a la ingenua **y** su Recall@5 no empeora más de 2 puntos.
+- **Regla de la tesis:** se sostiene si, con la búsqueda por defecto, Lastword baja la tasa de obsoletos en el primer resultado respecto a la ingenua **y** su Recall@5 no empeora más de 2 puntos.
 
 ### Umbral de posibles reemplazos
 
@@ -37,7 +37,7 @@ Las reglas de decisión se fijaron **antes** de ejecutar los experimentos y los 
 
 ### Modo de búsqueda por defecto
 
-- **Regla:** gana el modo con mayor MRR medio entre E1 (Vigente, todas las preguntas) y E2 (sesión). Si la diferencia con la híbrida es menor de 0.01, se queda la híbrida.
+- **Regla:** gana el modo con mayor MRR medio entre E1 (Lastword, todas las preguntas) y E2 (sesión). Si la diferencia con la híbrida es menor de 0.01, se queda la híbrida.
 - Las reglas se aplican en [`decisions.py`](decisions.py), que lee los resultados de E1 y E2.
 
 ### Fuera de alcance
@@ -50,7 +50,7 @@ Las reglas y los casos se fijaron **antes** de escribir los detectores. Pero los
 
 ### Qué se mide
 
-[`e3_security.py`](e3_security.py) pasa cada caso por los detectores de [`safety.py`](../src/vigente/safety.py) y cuenta los aciertos:
+[`e3_security.py`](e3_security.py) pasa cada caso por los detectores de [`safety.py`](../src/lastword/safety.py) y cuenta los aciertos:
 
 | Conjunto | Casos | Lo correcto |
 |---|---:|---|
@@ -67,7 +67,7 @@ Los secretos se generan al ejecutar con una semilla fija: el repositorio no cont
 
 - **Secretos.** El detector **rechaza** al guardar solo si detecta al menos el **90%** de los secretos **y** da como secreto como mucho **1 de las 40** frases parecidas (2,5%). Si no cumple las dos condiciones, solo avisa.
 - **Caracteres invisibles.** Es un detector determinista, así que la regla es exacta: **todos** los casos ocultos detectados y **ningún** texto legítimo afectado. Si falla, se corrige el detector.
-- **Instrucciones incrustadas.** Las memorias marcadas **siempre se guardan**. El aviso al agente en `recall` se activa solo si marca como mucho **4 de las 40** memorias legítimas (10%), porque un aviso que salta a menudo se acaba ignorando. Si marca más, las marcas solo se ven con `vigente review`. La tasa de detección se publica tal cual, sin umbral.
+- **Instrucciones incrustadas.** Las memorias marcadas **siempre se guardan**. El aviso al agente en `recall` se activa solo si marca como mucho **4 de las 40** memorias legítimas (10%), porque un aviso que salta a menudo se acaba ignorando. Si marca más, las marcas solo se ven con `lastword review`. La tasa de detección se publica tal cual, sin umbral.
 - Se mide una vez. Si una regla obliga a corregir un detector, se publican las dos mediciones y el cambio.
 - **Ajuste tras probarlo con datos reales** (fuera del protocolo): con los 89.539 mensajes de usuario de LongMemEval, la primera versión rechazaba 38 como secreto, y 35 eran rutas de URL que parecían tokens. Se corrigió la regla de tokens: dentro de una URL solo cuentan los parámetros con nombre de secreto (`?token=`, `?key=`…), y las rutas absolutas, las huellas (`SHA256:…`) y los trozos de código no cuentan. Ahora rechaza 3, uno de ellos un token real dentro de una URL. E3 dio exactamente el mismo resultado antes y después.
 
