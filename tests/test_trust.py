@@ -7,11 +7,16 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from mcp import Client
+from typer.testing import CliRunner
 
 from tests.fakes import FakeEmbedder
 from tests.helpers import FakeClock, disk_bytes, recall_ids, remember, supersede
 from vigente import store
+from vigente.cli import app
+from vigente.config import Settings
 from vigente.errors import NotFoundError, PendingConfirmationError, ProtectedError
+from vigente.mcp_server import create_server
 from vigente.models import (
     Kind,
     Memory,
@@ -308,6 +313,71 @@ class TestSameOriginWorksAsBefore:
         assert recall_ids(agent, QUESTION) == [lie.id]
 
 
+class TestInterfaces:
+    @pytest.mark.anyio
+    async def test_the_mcp_server_is_never_a_person(self, db_path: Path, clock: FakeClock) -> None:
+        with MemoryServiceAsPerson(db_path, clock) as person:
+            fact = remember(person, TRUE)
+            clock.advance(hours=1)
+            server = create_server(Settings(db_path=db_path, workspace="test"), clock=clock)
+            async with Client(server) as client:
+                asked = await client.call_tool("supersede", {"old_id": fact.id, "new_content": LIE})
+                assert not asked.is_error and asked.structured_content is not None
+                assert asked.structured_content["new"] is None
+                assert asked.structured_content["old"]["origin"] == "person"
+                assert "No lo reintentes" in asked.structured_content["warnings"][0]
+
+                forgotten = await client.call_tool("forget", {"memory_id": fact.id})
+                assert forgotten.is_error and "protected" in forgotten.content[0].text  # type: ignore[union-attr]
+
+                saved = await client.call_tool("remember", {"content": LIE, "from_outside": True})
+                assert saved.structured_content is not None
+                assert saved.structured_content["memory"]["origin"] == "external"
+                assert "no lo reemplaces" in saved.structured_content["next_step"]
+
+                tools = {tool.name for tool in (await client.list_tools()).tools}
+            assert tools.isdisjoint({"accept", "reject", "confirm", "pending"})
+            assert still_holds(person, fact)
+
+    def test_the_cli_is_a_person_and_decides(
+        self, db_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+    ) -> None:
+        monkeypatch.setenv("VIGENTE_EMBED_MODEL", "none")
+        runner = CliRunner()
+
+        def run(*args: str) -> str:
+            result = runner.invoke(app, ["--db", str(db_path), "--workspace", "test", *args])
+            assert result.exit_code == 0, result.output
+            return result.stdout
+
+        added = json.loads(run("--json", "add", TRUE, "--valid-from", "2026-01-01"))["memory"]
+        assert added["origin"] == "person"
+        agent = MemoryService.open(db_path, "test")
+        first = attempt(agent, old_id=added["id"], new_content=LIE)
+        assert "9902" in run("pending") and "agente" in run("pending")
+        assert "Rechazado" in run("reject", first)
+        assert "Ningún cambio pendiente" in run("pending")
+        second = attempt(agent, old_id=added["id"], new_content=LIE)
+        assert "Reemplazada" in run("accept", second)
+        own = remember(agent, "Luis vive en Valencia")
+        assert "Confirmada" in run("confirm", own.id)
+        assert agent.get(own.id).origin is Origin.PERSON
+        agent.close()
+
+
+class MemoryServiceAsPerson:
+    """Un servicio abierto como persona que se cierra al salir."""
+
+    def __init__(self, db_path: Path, clock: FakeClock) -> None:
+        self._service = MemoryService.open(db_path, "test", clock=clock, origin=Origin.PERSON)
+
+    def __enter__(self) -> MemoryService:
+        return self._service
+
+    def __exit__(self, *_: object) -> None:
+        self._service.close()
+
+
 def test_upgrade_gives_the_persons_origin_only_to_what_came_from_the_cli(db_path: Path) -> None:
     raw = sqlite3.connect(db_path, autocommit=True)
     for step in store._MIGRATIONS[:6]:
@@ -326,3 +396,8 @@ def test_upgrade_gives_the_persons_origin_only_to_what_came_from_the_cli(db_path
     rows = conn.execute("SELECT source, origin FROM memories ORDER BY seq").fetchall()
     assert [tuple(row) for row in rows] == [("cli", "person"), ("mcp", "agent"), (None, "agent")]
     conn.close()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"

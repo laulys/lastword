@@ -35,6 +35,8 @@ from vigente.models import (
     ListQuery,
     Memory,
     NewMemory,
+    Origin,
+    PendingChange,
     RecallQuery,
     RecallResult,
     RememberResult,
@@ -55,7 +57,12 @@ out = Console()
 err = Console(stderr=True)
 
 _KIND = {Kind.FACT: "hecho", Kind.EPISODE: "episodio"}
-_SOURCES = {("fts",): "texto", ("vector",): "vector", ("fts", "vector"): "ambos"}
+_SOURCES = {
+    ("fts",): "texto",
+    ("vector",): "vector",
+    ("fts", "vector"): "ambos",
+    ("trust",): "más fiable",
+}
 _MODES = {"vector": "por significado", "hybrid": "significado + texto", "text": "solo texto"}
 
 
@@ -162,7 +169,11 @@ def _service(ctx: typer.Context) -> Iterator[MemoryService]:
     try:
         embedder = options.embedding.build()
         service = MemoryService.open(
-            options.db, options.workspace, embedder=embedder, search_mode=options.search_mode
+            options.db,
+            options.workspace,
+            embedder=embedder,
+            search_mode=options.search_mode,
+            origin=Origin.PERSON,  # quien usa la CLI es una persona (ADR-0011)
         )
         yield service
     except VigenteError as exc:
@@ -567,6 +578,79 @@ def review(ctx: typer.Context) -> None:
             for memory in flagged
         ]
         _emit(ctx, data, render)
+
+
+@app.command(help=tr("Da por bueno un hecho que guardó un agente: solo una persona lo cambia."))
+def confirm(
+    ctx: typer.Context,
+    memory_id: Annotated[str, typer.Argument(help=tr("Id de la memoria."))],
+) -> None:
+    with _service(ctx) as service:
+        memory = service.confirm(memory_id)
+        _emit(ctx, memory, lambda: out.print(tr("[green]Confirmada[/] {id}", id=memory.id)))
+
+
+_ORIGIN = {Origin.PERSON: "persona", Origin.AGENT: "agente", Origin.EXTERNAL: "de fuera"}
+
+
+def _pending_table(service: MemoryService, changes: list[PendingChange]) -> Table:
+    table = _table(tr("cambios pendientes: {n}", n=len(changes)))
+    table.add_column("id", style="dim", no_wrap=True)
+    table.add_column(tr("sigue valiendo"), overflow="fold", min_width=20)
+    table.add_column(tr("cambio pedido"), overflow="fold", min_width=20)
+    for change in changes:
+        if change.new_id is None:
+            text, flagged = change.content or "", bool(change.flags)
+        else:
+            memory = service.get(change.new_id)
+            text, flagged = memory.content, bool(memory.flags)
+        wanted = f"[yellow]⚠[/] {escape(text)}" if flagged else escape(text)
+        origin = tr("pedido por: {origin}", origin=tr(_ORIGIN[change.origin]))
+        detail = f"{origin}. {escape(change.reason)}" if change.reason else origin
+        wanted += f"\n[dim]{detail}[/]"
+        olds = "\n".join(escape(service.get(old_id).content) for old_id in change.old_ids)
+        table.add_row(change.id, olds, wanted)
+    return table
+
+
+@app.command(help=tr("Lista los cambios que esperan a que una persona los acepte o rechace."))
+def pending(ctx: typer.Context) -> None:
+    with _service(ctx) as service:
+        changes = service.pending()
+
+        def render() -> None:
+            if not changes:
+                out.print(tr("[green]Ningún cambio pendiente.[/]"))
+                return
+            out.print(_pending_table(service, changes))
+            out.print(tr("Decide con vigente accept <id> o vigente reject <id>."))
+
+        _emit(ctx, [change.model_dump(mode="json") for change in changes], render)
+
+
+@app.command(help=tr("Acepta un cambio pendiente: reemplaza el hecho y pasa a ser tuyo."))
+def accept(
+    ctx: typer.Context,
+    pending_id: Annotated[str, typer.Argument(help=tr("Id del cambio pendiente."))],
+) -> None:
+    with _service(ctx) as service:
+        result = service.accept(pending_id)
+        _emit(ctx, result, lambda: _render_supersede(result))
+        _warn(ctx, result.warnings)
+
+
+@app.command(help=tr("Rechaza un cambio pendiente y borra su texto."))
+def reject(
+    ctx: typer.Context,
+    pending_id: Annotated[str, typer.Argument(help=tr("Id del cambio pendiente."))],
+) -> None:
+    with _service(ctx) as service:
+        service.reject(pending_id)
+        _emit(
+            ctx,
+            {"rejected_id": pending_id.strip().upper()},
+            lambda: out.print(tr("[green]Rechazado.[/] El hecho anterior sigue vigente.")),
+        )
 
 
 @app.command(help=tr("Comprueba la consistencia de la base de datos y de sus índices."))
