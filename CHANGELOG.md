@@ -2,7 +2,9 @@
 
 What changed in each version of Lastword, called Vigente until 1.4. Each one has its [release notes](https://github.com/laulys/lastword/releases), with measurements and upgrade instructions.
 
-## Unreleased
+## 2.0.0 · 2026-11-25
+
+A new name ([pull request](https://github.com/laulys/lastword/pull/13)). The major version is for the Python package, which is imported with another name; memories and databases do not change.
 
 **Changed**
 

@@ -81,6 +81,7 @@ The design, what was discarded and why: [ADR-0011](docs/decisions/0011-quien-pue
 
 ## What's new since 1.0
 
+- **A new name (2.0).** The project was called Vigente; what was set up with that name keeps working ([how to upgrade](#development)).
 - **Who may change a fact (1.4).** A less trusted origin cannot replace a more trusted fact: the change waits for a person ([why](#security-research-can-a-lie-replace-a-fact)).
 - **Security review (1.4).** Three rounds of automated reviewers, before release: two ways around that protection, hidden text, terminal codes and a pattern that blocked the server, all fixed ([CHANGELOG](CHANGELOG.md)).
 - **Security (1.1).** Secrets are rejected on save, hidden Unicode is rejected, and text that reads like an order to the agent is flagged. `lastword review` lists what is flagged.

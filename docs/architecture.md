@@ -263,7 +263,7 @@ Lo que sigue de esta sección es el plan original.
 2. **Los `episode` son inmutables** y no se pueden reemplazar.
 3. **E2b (agente simulado con qwen3:8b)** queda como opcional para el Hito 4. *(Hito 4)* Se dejó fuera: llevaría horas de cómputo y mediría sobre todo al modelo local. El protocolo con un agente real ya está demostrado en la demo del Hito 3.
 4. **Modelo de embeddings:** se compararon `qwen3-embedding:0.6b` y `embeddinggemma` con un mini-benchmark propio. Elegido: **embeddinggemma** ([ADR-0004](decisions/0004-modelo-de-embeddings.md)). *(Hito 2)*
-5. **Nombre «vigente».** *(después de la v1.4)* Pasa a ser **Lastword**: la última palabra es lo último que es verdad, y también quién decide. «Vigente» sigue usándose en español como adjetivo, para lo que rige ahora.
+5. **Nombre «vigente».** *(v2.0)* Pasa a ser **Lastword**: la última palabra es lo último que es verdad, y también quién decide. «Vigente» sigue usándose en español como adjetivo, para lo que rige ahora.
 6. **Git:** propongo `git init` al empezar el Hito 1 y un commit por hito, con tu autorización en cada uno.
 
 ## 10. Riesgos
