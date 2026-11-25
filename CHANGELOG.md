@@ -2,6 +2,11 @@
 
 What changed in each version of Vigente. Each one has its [release notes](https://github.com/laulys/vigente/releases), with measurements and upgrade instructions.
 
+## Unreleased
+
+- Security research: a false fact can replace a true one without any warning, reproduced in 12 of 12 cases after reading about [ShadowMerge](https://arxiv.org/abs/2605.09033). It is **not fixed yet**; [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) proposes how.
+- The README says when the security filters matter most.
+
 ## 1.3.1 · 2026-11-18
 
 Documentation only; the code does not change ([pull request](https://github.com/laulys/vigente/pull/10)).

@@ -45,6 +45,29 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 
 The decision rules were fixed **before** measuring ([protocol](eval/README.md)), and E1 and E2 give identical results when re-run.
 
+## Security research: can a lie replace a fact?
+
+**The question.** Filters stop secrets and orders. But a lie written as a plain sentence is neither. [ShadowMerge](https://arxiv.org/abs/2605.09033) (May 2026) attacks graph memories this way: instead of an order, it plants an ordinary relation that contradicts the true one. Its authors report a 93.8% average success rate on Mem0, and find that representative input-side defenses are not enough. Vigente is not a graph, and ShadowMerge itself was not run against it, but the idea carries over.
+
+**What happened here.** A person saves «the supplier is paid on the account ending in 4471». An agent that read a forged email supersedes it with «…ending in 9902». Over 12 cases like this ([script](eval/false_replacement.py), [results](eval/results/false_replacement.md)):
+
+| | Lies accepted | With any warning | `recall` returns only the lie | Truth can be recovered |
+|---|---:|---:|---:|---:|
+| Agent uses `supersede` | 12 of 12 | 0 of 12 | **12 of 12** | 12 of 12 |
+| Agent uses `remember` | 12 of 12 | 0 of 12 | 0 of 12 (returns both) | 12 of 12 |
+
+Nothing is overwritten, so `history` and `as_of` still give the true fact. But nobody is told to look, and in all 12 cases `remember` even suggests that the agent close the true fact. **This is open in the current version.**
+
+**How others handle it**, read in their code on 25 November 2026, without running it:
+
+| Project | Validity dates | Does trust decide what replaces what? |
+|---|---|---|
+| [Graphiti](https://github.com/getzep/graphiti/blob/38eef1eb9f9e993effc9801d64cb73aaf9d3cbbd/graphiti_core/utils/maintenance/edge_operations.py#L795) | Yes | No: the later date wins |
+| [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard/blob/2628cfdb91731ab80caf7fcb0adbe293645ce6e3/src/agent_memory_guard/policies/access.py#L58) | Not found | Partly: rules on who may write what; quarantine and rollback |
+| [ShieldCortex](https://github.com/Drakon-Systems-Ltd/ShieldCortex/blob/128a0734883f33309c9ebfe171c9511fcfb9f6b8/src/threat-graph/conflict.ts#L36) | Partly, in its graph | Partly: trust flags conflicts in four relation types, and a person decides |
+
+**What comes next.** [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) (in Spanish) proposes that each memory keeps its origin, and that a less trusted origin cannot close a more trusted fact: the true one stays current while the change waits for a person. It lists what it would *not* protect, and fixes how it will be measured before any code is written. **Proposed, not implemented.**
+
 ## What's new since 1.0
 
 - **Security (1.1).** Secrets are rejected on save, hidden Unicode is rejected, and text that reads like an order to the agent is flagged. `vigente review` lists what is flagged.
@@ -63,7 +86,7 @@ Every version, in detail: [CHANGELOG.md](CHANGELOG.md).
 - **The engine calls no LLM.** `remember` uses local embeddings (embeddinggemma via Ollama) to propose facts the new one may replace. The agent, which already is an LLM, decides. Proposals favour not missing a replacement (17 of 18 in the hand-written set), so statements on the same topic also get one; similarity cannot tell «this updates that» from «this adds detail», and [masking names and numbers did not help](docs/decisions/0004-modelo-de-embeddings.md).
 - **Forgetting is real.** `forget` deletes every version of a fact from the rows, both indexes and the disk. A test checks that the bytes are gone from the file.
 - **It degrades gracefully.** Without embeddings it searches by text. It refuses to send memories to a non-local service unless you allow it.
-- **It is safe to share between agents.** Secrets are rejected on save, and memories that read like orders are flagged ([Security and privacy](#security-and-privacy)).
+- **It is made to be shared between agents.** Secrets are rejected on save, and memories that read like orders are flagged ([Security and privacy](#security-and-privacy)). A false fact is neither: [that is still open](#security-research-can-a-lie-replace-a-fact).
 
 ## Quick start
 
@@ -212,6 +235,7 @@ Each decision has an ADR with the alternatives considered (in Spanish):
 8. [One new fact can replace several](docs/decisions/0008-un-hecho-reemplaza-a-varios.md)
 9. [Sharing between computers: HTTP with a token](docs/decisions/0009-compartir-por-http.md)
 10. [Two-stage search: binary vectors, then an exact re-rank](docs/decisions/0010-busqueda-en-dos-pasos.md)
+11. [Who may change what is true](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) (proposed, not implemented)
 
 The full design is in [docs/architecture.md](docs/architecture.md).
 

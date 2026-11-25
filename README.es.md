@@ -45,6 +45,29 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 
 Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.md)), y E1 y E2 dan resultados idénticos al repetirlos.
 
+## Investigación de seguridad: ¿puede una mentira reemplazar a un hecho?
+
+**La pregunta.** Los filtros paran secretos y órdenes. Pero una mentira escrita como una frase normal no es ninguna de las dos cosas. [ShadowMerge](https://arxiv.org/abs/2605.09033) (mayo de 2026) ataca así a las memorias en grafo: en vez de una orden, introduce una relación corriente que contradice a la verdadera. Sus autores miden un 93,8% de éxito medio sobre Mem0 y concluyen que las defensas de entrada representativas no bastan. Vigente no es un grafo y no se ha ejecutado ShadowMerge contra él, pero la idea se traslada.
+
+**Qué pasó aquí.** Una persona guarda «el proveedor cobra en la cuenta acabada en 4471». Un agente que leyó un correo falso lo reemplaza por «…acabada en 9902». Con 12 casos así ([script](eval/false_replacement.py), [resultados](eval/results/false_replacement.md)):
+
+| | Mentiras aceptadas | Con algún aviso | `recall` da solo la mentira | La verdad se recupera |
+|---|---:|---:|---:|---:|
+| El agente usa `supersede` | 12 de 12 | 0 de 12 | **12 de 12** | 12 de 12 |
+| El agente usa `remember` | 12 de 12 | 0 de 12 | 0 de 12 (da las dos) | 12 de 12 |
+
+Nada se sobrescribe, así que `history` y `as_of` siguen dando el hecho verdadero. Pero nadie avisa de que hay que mirarlo, y en los 12 casos `remember` incluso propone al agente cerrar el hecho verdadero. **Está abierto en la versión actual.**
+
+**Cómo lo tratan otros**, leído en su código el 25 de noviembre de 2026, sin ejecutarlo:
+
+| Proyecto | Fechas de validez | ¿La confianza decide qué reemplaza a qué? |
+|---|---|---|
+| [Graphiti](https://github.com/getzep/graphiti/blob/38eef1eb9f9e993effc9801d64cb73aaf9d3cbbd/graphiti_core/utils/maintenance/edge_operations.py#L795) | Sí | No: vale la fecha posterior |
+| [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard/blob/2628cfdb91731ab80caf7fcb0adbe293645ce6e3/src/agent_memory_guard/policies/access.py#L58) | No se encontraron | En parte: reglas de quién escribe qué; cuarentena y vuelta atrás |
+| [ShieldCortex](https://github.com/Drakon-Systems-Ltd/ShieldCortex/blob/128a0734883f33309c9ebfe171c9511fcfb9f6b8/src/threat-graph/conflict.ts#L36) | En parte, en su grafo | En parte: la confianza señala conflictos en cuatro tipos de relación y decide una persona |
+
+**Qué viene ahora.** El [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) propone que cada memoria guarde su origen y que un origen menos fiable no pueda cerrar un hecho más fiable: el verdadero sigue vigente mientras el cambio espera a una persona. Dice también lo que *no* protegería, y fija cómo se medirá antes de escribir código. **Propuesto, sin implementar.**
+
 ## Novedades desde la 1.0
 
 - **Seguridad (1.1).** Rechaza los secretos y los caracteres Unicode invisibles al guardar, y marca el texto que suena a orden para el agente. `vigente review` lista lo marcado.
@@ -63,7 +86,7 @@ Cada versión, en detalle: [CHANGELOG.md](CHANGELOG.md) (en inglés).
 - **El motor no llama a ningún LLM.** `remember` usa embeddings locales (embeddinggemma con Ollama) para proponer hechos que lo nuevo podría reemplazar. Decide el agente, que ya es un LLM. Las propuestas priorizan no perder ningún reemplazo (17 de 18 en el conjunto escrito a mano), así que las frases del mismo tema también reciben una: la similitud no distingue «esto actualiza aquello» de «esto añade un detalle», y [tapar nombres y cifras no ayudó](docs/decisions/0004-modelo-de-embeddings.md).
 - **Olvidar es borrar de verdad.** `forget` borra todas las versiones de un hecho de las filas, de los dos índices y del disco. Un test comprueba que los bytes desaparecen del archivo.
 - **Si algo falla, sigue funcionando.** Sin embeddings, busca por texto. Se niega a enviar memorias a un servicio que no sea local salvo que lo permitas.
-- **Se puede compartir entre agentes con seguridad.** Rechaza los secretos al guardar y marca las memorias que suenan a orden ([Seguridad y privacidad](#seguridad-y-privacidad)).
+- **Está hecha para compartirse entre agentes.** Rechaza los secretos al guardar y marca las memorias que suenan a orden ([Seguridad y privacidad](#seguridad-y-privacidad)). Un dato falso no es ninguna de las dos cosas: [eso sigue abierto](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho).
 
 ## Probarlo
 
@@ -212,6 +235,7 @@ Cada decisión tiene un ADR con las alternativas que se consideraron:
 8. [Un hecho nuevo puede reemplazar a varios](docs/decisions/0008-un-hecho-reemplaza-a-varios.md)
 9. [Compartir entre ordenadores: HTTP con token](docs/decisions/0009-compartir-por-http.md)
 10. [Búsqueda en dos pasos: vectores binarios y reordenación exacta](docs/decisions/0010-busqueda-en-dos-pasos.md)
+11. [Quién puede cambiar lo que es verdad](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) (propuesto, sin implementar)
 
 El diseño completo está en [docs/architecture.md](docs/architecture.md).
 
