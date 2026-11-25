@@ -81,7 +81,8 @@ El diseño, lo que se descartó y por qué, en el [ADR-0011](docs/decisions/0011
 
 ## Novedades desde la 1.0
 
-- **Quién puede cambiar un hecho (sin publicar).** Un origen menos fiable no puede reemplazar un hecho más fiable: el cambio espera a una persona ([por qué](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
+- **Quién puede cambiar un hecho (1.4).** Un origen menos fiable no puede reemplazar un hecho más fiable: el cambio espera a una persona ([por qué](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
+- **Revisión de seguridad (1.4).** Tres pasadas de revisores automáticos, antes de publicar: dos formas de esquivar esa protección, texto escondido, códigos de terminal y un patrón que bloqueaba el servidor, todo corregido ([CHANGELOG](CHANGELOG.md)).
 - **Seguridad (1.1).** Rechaza los secretos y los caracteres Unicode invisibles al guardar, y marca el texto que suena a orden para el agente. `vigente review` lista lo marcado.
 - **Un hecho reemplaza a varios (1.2).** «Ana y Luis se mudaron a Lisboa» cierra la ciudad de los dos de una vez: `also_old_ids` en MCP, `--also` en la CLI. Desde la 1.3 se puede sumar otro hecho después al mismo reemplazo.
 - **Compartirla entre ordenadores (1.2).** `vigente-mcp --http` sirve la memoria a otros ordenadores, a un equipo o a un agente en la nube, con un token obligatorio. Desde la 1.3, `--allowed-host` la deja en localhost detrás de un proxy HTTPS.

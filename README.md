@@ -81,7 +81,8 @@ The design, what was discarded and why: [ADR-0011](docs/decisions/0011-quien-pue
 
 ## What's new since 1.0
 
-- **Who may change a fact (unreleased).** A less trusted origin cannot replace a more trusted fact: the change waits for a person ([why](#security-research-can-a-lie-replace-a-fact)).
+- **Who may change a fact (1.4).** A less trusted origin cannot replace a more trusted fact: the change waits for a person ([why](#security-research-can-a-lie-replace-a-fact)).
+- **Security review (1.4).** Three rounds of automated reviewers, before release: two ways around that protection, hidden text, terminal codes and a pattern that blocked the server, all fixed ([CHANGELOG](CHANGELOG.md)).
 - **Security (1.1).** Secrets are rejected on save, hidden Unicode is rejected, and text that reads like an order to the agent is flagged. `vigente review` lists what is flagged.
 - **One fact replaces several (1.2).** «Ana and Luis moved to Lisbon» closes both their old cities in one step: `also_old_ids` in MCP, `--also` in the CLI. Since 1.3, another fact can be added later to the same replacement.
 - **Share it between computers (1.2).** `vigente-mcp --http` serves the memory to other machines, a team or a cloud agent, with a required token. Since 1.3, `--allowed-host` keeps it on localhost behind an HTTPS proxy.

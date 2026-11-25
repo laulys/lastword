@@ -2,7 +2,9 @@
 
 What changed in each version of Vigente. Each one has its [release notes](https://github.com/laulys/vigente/releases), with measurements and upgrade instructions.
 
-## Unreleased
+## 1.4.0 · 2026-11-25
+
+Who may change a fact, and the fixes from a security review ([pull request](https://github.com/laulys/vigente/pull/12)).
 
 **Added**
 
