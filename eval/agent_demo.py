@@ -1,7 +1,7 @@
-"""Demo con un agente real: cuatro sesiones independientes de Claude Code usando Vigente.
+"""Demo con un agente real: cuatro sesiones independientes de Claude Code usando Lastword.
 
 Cada sesión es un proceso nuevo, sin contexto de las anteriores: lo único que comparten es
-Vigente. El agente solo tiene las herramientas de Vigente (`--tools ""` quita las propias de
+Lastword. El agente solo tiene las herramientas de Lastword (`--tools ""` quita las propias de
 Claude Code, incluida su memoria de archivos) y una configuración MCP propia
 (`--strict-mcp-config`), así que no se toca la configuración del usuario.
 
@@ -23,9 +23,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from vigente.config import EmbeddingSettings
-from vigente.models import ListQuery, RecallQuery
-from vigente.service import MemoryService
+from lastword.config import EmbeddingSettings
+from lastword.models import ListQuery, RecallQuery
+from lastword.service import MemoryService
 
 REPO = Path(__file__).resolve().parent.parent
 RESULTS = REPO / "eval" / "results" / "agent_demo.md"
@@ -37,7 +37,7 @@ PROMPTS = [
     "¿Qué base de datos usamos en el proyecto y a qué hora es el daily?",
     "Apunta esto: desde la semana que viene el daily pasa a las 10.",
 ]
-VIGENTE_TOOLS = ["remember", "recall", "supersede", "history", "list_memories"]  # sin forget
+LASTWORD_TOOLS = ["remember", "recall", "supersede", "history", "list_memories"]  # sin forget
 
 
 @dataclass
@@ -54,7 +54,7 @@ def run_session(workdir: Path, prompt: str) -> Session:
     command = [
         "claude", "-p", prompt,
         "--mcp-config", str(workdir / "mcp.json"), "--strict-mcp-config",
-        "--allowedTools", ",".join(f"mcp__vigente__{name}" for name in VIGENTE_TOOLS),
+        "--allowedTools", ",".join(f"mcp__lastword__{name}" for name in LASTWORD_TOOLS),
         "--tools", "",
         "--output-format", "stream-json", "--verbose",
     ]  # fmt: skip
@@ -72,7 +72,7 @@ def run_session(workdir: Path, prompt: str) -> Session:
         elif event.get("type") == "assistant":
             for block in event["message"].get("content", []):
                 if block.get("type") == "tool_use":
-                    name = block["name"].removeprefix("mcp__vigente__")
+                    name = block["name"].removeprefix("mcp__lastword__")
                     session.tool_calls.append((name, block["input"]))
         elif event.get("type") == "result":
             session.answer = (event.get("result") or "").strip()
@@ -95,7 +95,7 @@ def report(sessions: list[Session], db_path: Path) -> str:
         "",
         "Generado por `eval/agent_demo.py`. Cuatro sesiones **independientes** de Claude Code "
         "(cada una es un proceso nuevo, sin memoria de las anteriores) que solo comparten "
-        "Vigente. El agente no tiene más herramientas que las de Vigente.",
+        "Lastword. El agente no tiene más herramientas que las de Lastword.",
         "",
         f"- Fecha: {datetime.now(UTC):%Y-%m-%d}",
         f"- {claude_version()}, modelo `{sessions[0].model}`",
@@ -144,7 +144,7 @@ def report(sessions: list[Session], db_path: Path) -> str:
             results = service.recall(query).results
             lines.append(f"- {label}: {results[0].memory.content if results else '(nada)'}")
         problems = service.doctor()
-        lines += ["", f"`vigente doctor`: {problems if problems else 'sin problemas'}", ""]
+        lines += ["", f"`lastword doctor`: {problems if problems else 'sin problemas'}", ""]
     finally:
         service.close()
         if embedder is not None:
@@ -153,15 +153,15 @@ def report(sessions: list[Session], db_path: Path) -> str:
 
 
 def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="vigente-demo-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="lastword-demo-") as tmp:
         workdir = Path(tmp)
         db_path = workdir / "demo.db"
         config = {
             "mcpServers": {
-                "vigente": {
+                "lastword": {
                     "command": "uv",
-                    "args": ["--directory", str(REPO), "run", "vigente-mcp"],
-                    "env": {"VIGENTE_DB": str(db_path), "VIGENTE_WORKSPACE": WORKSPACE},
+                    "args": ["--directory", str(REPO), "run", "lastword-mcp"],
+                    "env": {"LASTWORD_DB": str(db_path), "LASTWORD_WORKSPACE": WORKSPACE},
                 }
             }
         }

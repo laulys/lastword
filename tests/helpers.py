@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from vigente.models import Memory, NewMemory, RecallQuery, SupersedeRequest
-from vigente.service import MemoryService
+from lastword.models import Memory, NewMemory, RecallQuery, SupersedeRequest
+from lastword.service import MemoryService
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 

@@ -17,9 +17,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-from vigente.errors import ConfigError, EmbeddingError
-from vigente.i18n import tr
-from vigente.models import MAX_DIM
+from lastword.errors import ConfigError, EmbeddingError
+from lastword.i18n import tr
+from lastword.models import MAX_DIM
 
 Purpose = Literal["document", "query", "similarity"]
 
@@ -135,7 +135,7 @@ class OpenAICompatibleEmbedder:
             raise ConfigError(
                 tr(
                     "{url} no es una dirección local. Para enviar el contenido de las memorias a "
-                    "un servicio remoto, activa VIGENTE_ALLOW_REMOTE=1.",
+                    "un servicio remoto, activa LASTWORD_ALLOW_REMOTE=1.",
                     url=_without_credentials(base_url),
                 )
             )

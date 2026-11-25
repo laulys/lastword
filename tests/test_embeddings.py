@@ -7,10 +7,10 @@ from collections.abc import Callable, Iterator
 import httpx
 import pytest
 
-from vigente import embeddings
-from vigente.config import DEFAULT_EMBED_MODEL, EmbeddingSettings
-from vigente.embeddings import PROFILES, ModelProfile, OpenAICompatibleEmbedder, profile_for
-from vigente.errors import ConfigError, EmbeddingError
+from lastword import embeddings
+from lastword.config import DEFAULT_EMBED_MODEL, EmbeddingSettings
+from lastword.embeddings import PROFILES, ModelProfile, OpenAICompatibleEmbedder, profile_for
+from lastword.errors import ConfigError, EmbeddingError
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -116,7 +116,7 @@ class TestErrors:
         with pytest.raises(EmbeddingError, match="HTTP 400") as error:
             embedder(recorder).embed(["x"], "document")
         assert len(recorder.requests) == 1
-        # Lo que responde el servicio llegaría al agente como un aviso de Vigente.
+        # Lo que responde el servicio llegaría al agente como un aviso de Lastword.
         assert "modelo desconocido" not in error.value.message
 
     @pytest.mark.parametrize(
@@ -221,7 +221,7 @@ class TestPrivacy:
             proxy.close()
 
     def test_remote_services_need_explicit_permission(self) -> None:
-        with pytest.raises(ConfigError, match="VIGENTE_ALLOW_REMOTE"):
+        with pytest.raises(ConfigError, match="LASTWORD_ALLOW_REMOTE"):
             OpenAICompatibleEmbedder("m", base_url="https://api.example.com/v1")
         OpenAICompatibleEmbedder("m", base_url="https://api.example.com/v1", allow_remote=True)
 
@@ -249,16 +249,16 @@ class TestSettings:
 
     @pytest.mark.parametrize("value", ["none", "OFF", "", "0"])
     def test_embeddings_can_be_disabled(self, value: str) -> None:
-        settings = EmbeddingSettings.from_env({"VIGENTE_EMBED_MODEL": value})
+        settings = EmbeddingSettings.from_env({"LASTWORD_EMBED_MODEL": value})
         assert settings.model is None
         assert settings.build() is None
 
     def test_reads_secrets_and_permissions_from_the_environment(self) -> None:
         env = {
-            "VIGENTE_EMBED_MODEL": "text-embedding-3-small",
-            "VIGENTE_EMBED_BASE_URL": "https://api.example.com/v1",
-            "VIGENTE_EMBED_API_KEY": "clave",
-            "VIGENTE_ALLOW_REMOTE": "1",
+            "LASTWORD_EMBED_MODEL": "text-embedding-3-small",
+            "LASTWORD_EMBED_BASE_URL": "https://api.example.com/v1",
+            "LASTWORD_EMBED_API_KEY": "clave",
+            "LASTWORD_ALLOW_REMOTE": "1",
         }
         settings = EmbeddingSettings.from_env(env)
         assert (settings.model, settings.api_key, settings.allow_remote) == (
@@ -270,10 +270,10 @@ class TestSettings:
 
 
 def test_search_mode_comes_from_the_environment() -> None:
-    from vigente.config import Settings
-    from vigente.models import SearchMode
+    from lastword.config import Settings
+    from lastword.models import SearchMode
 
     assert Settings.from_env({}).search_mode is SearchMode.VECTOR
-    assert Settings.from_env({"VIGENTE_SEARCH_MODE": " Hybrid "}).search_mode is SearchMode.HYBRID
+    assert Settings.from_env({"LASTWORD_SEARCH_MODE": " Hybrid "}).search_mode is SearchMode.HYBRID
     with pytest.raises(ValueError, match="usa vector, hybrid, text"):
-        Settings.from_env({"VIGENTE_SEARCH_MODE": "magia"})
+        Settings.from_env({"LASTWORD_SEARCH_MODE": "magia"})

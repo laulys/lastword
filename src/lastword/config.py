@@ -7,12 +7,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from vigente.embeddings import DEFAULT_BASE_URL, OpenAICompatibleEmbedder
-from vigente.i18n import tr
-from vigente.models import SearchMode
+from lastword.embeddings import DEFAULT_BASE_URL, OpenAICompatibleEmbedder
+from lastword.i18n import tr
+from lastword.models import SearchMode
 
 DEFAULT_EMBED_MODEL = "embeddinggemma"  # ver ADR-0004
-DEFAULT_DB_PATH = Path("~/.vigente/vigente.db")
+DEFAULT_DB_PATH = Path("~/.lastword/lastword.db")
 DEFAULT_WORKSPACE = "default"
 _DISABLED = {"", "none", "off", "false", "0"}
 _ENABLED = {"1", "true", "yes", "on"}
@@ -33,15 +33,15 @@ class EmbeddingSettings:
         model: str | None = None,
         base_url: str | None = None,
     ) -> EmbeddingSettings:
-        """Lee VIGENTE_EMBED_*; `model` y `base_url`, si se pasan, tienen prioridad."""
+        """Lee LASTWORD_EMBED_*; `model` y `base_url`, si se pasan, tienen prioridad."""
         raw_model = (
-            model if model is not None else env.get("VIGENTE_EMBED_MODEL", DEFAULT_EMBED_MODEL)
+            model if model is not None else env.get("LASTWORD_EMBED_MODEL", DEFAULT_EMBED_MODEL)
         )
         return cls(
             model=None if raw_model.strip().lower() in _DISABLED else raw_model.strip(),
-            base_url=base_url or env.get("VIGENTE_EMBED_BASE_URL") or DEFAULT_BASE_URL,
-            api_key=env.get("VIGENTE_EMBED_API_KEY") or None,
-            allow_remote=env.get("VIGENTE_ALLOW_REMOTE", "").strip().lower() in _ENABLED,
+            base_url=base_url or env.get("LASTWORD_EMBED_BASE_URL") or DEFAULT_BASE_URL,
+            api_key=env.get("LASTWORD_EMBED_API_KEY") or None,
+            allow_remote=env.get("LASTWORD_ALLOW_REMOTE", "").strip().lower() in _ENABLED,
         )
 
     def build(self) -> OpenAICompatibleEmbedder | None:
@@ -67,10 +67,10 @@ class Settings:
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> Settings:
         return cls(
-            db_path=Path(env.get("VIGENTE_DB") or DEFAULT_DB_PATH).expanduser(),
-            workspace=env.get("VIGENTE_WORKSPACE") or DEFAULT_WORKSPACE,
+            db_path=Path(env.get("LASTWORD_DB") or DEFAULT_DB_PATH).expanduser(),
+            workspace=env.get("LASTWORD_WORKSPACE") or DEFAULT_WORKSPACE,
             embedding=EmbeddingSettings.from_env(env),
-            search_mode=parse_search_mode(env.get("VIGENTE_SEARCH_MODE", "")),
+            search_mode=parse_search_mode(env.get("LASTWORD_SEARCH_MODE", "")),
         )
 
 

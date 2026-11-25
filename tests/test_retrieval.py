@@ -5,10 +5,10 @@ from datetime import timedelta
 import pytest
 from pydantic import ValidationError
 
+from lastword.models import Kind, RecallQuery, Status
+from lastword.retrieval import MAX_QUERY_TOKENS, fts_match_expression
+from lastword.service import MemoryService
 from tests.helpers import T0, FakeClock, recall_ids, remember, supersede
-from vigente.models import Kind, RecallQuery, Status
-from vigente.retrieval import MAX_QUERY_TOKENS, fts_match_expression
-from vigente.service import MemoryService
 
 
 class TestMatchExpression:

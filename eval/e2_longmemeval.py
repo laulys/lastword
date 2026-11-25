@@ -1,7 +1,7 @@
 """E2: búsqueda sobre conversaciones reales (LongMemEval-cleaned, 470 preguntas).
 
 Cada pregunta trae su propio historial (unas 48 sesiones). Cada mensaje del usuario se guarda
-en Vigente como `episode` con la fecha de su sesión, y se mide si la búsqueda encuentra las
+en Lastword como `episode` con la fecha de su sesión, y se mide si la búsqueda encuentra las
 sesiones con la evidencia. Protocolo en eval/README.md. Uso:
     uv run python eval/download_longmemeval.py
     uv run python eval/longmemeval.py      # embeddings en caché
@@ -25,11 +25,11 @@ from exact_cases import has_codes
 from longmemeval import Item, load
 from metrics import pct
 
-from vigente import retrieval, store
-from vigente.config import EmbeddingSettings
-from vigente.embeddings import Embedder
-from vigente.models import MAX_CONTENT_CHARS, Hit, Kind, NewMemory
-from vigente.service import MemoryService
+from lastword import retrieval, store
+from lastword.config import EmbeddingSettings
+from lastword.embeddings import Embedder
+from lastword.models import MAX_CONTENT_CHARS, Hit, Kind, NewMemory
+from lastword.service import MemoryService
 
 HERE = Path(__file__).parent
 RESULTS_MD = HERE / "results" / "e2_longmemeval.md"

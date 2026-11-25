@@ -1,7 +1,7 @@
 """Latencia y escala: ¿hasta dónde llega un solo archivo SQLite?
 
 Usa vectores aleatorios de 768 dimensiones (las de embeddinggemma) para medir el coste de
-Vigente sin mezclarlo con el del modelo, que se mide aparte (eval/embedding_choice.py y la
+Lastword sin mezclarlo con el del modelo, que se mide aparte (eval/embedding_choice.py y la
 caché de E2). Las bases van a un directorio temporal, en disco, con WAL, como en uso real.
 
 Todas las memorias son hechos. Es el peor caso para guardar: cada hecho nuevo se compara con
@@ -28,11 +28,11 @@ from pathlib import Path
 from charts import bar_chart
 from metrics import percentile
 
-from vigente import store
-from vigente.embeddings import ModelProfile, Purpose
-from vigente.ids import new_ulid
-from vigente.models import Kind, ListQuery, Memory, NewMemory, RecallQuery
-from vigente.service import MemoryService
+from lastword import store
+from lastword.embeddings import ModelProfile, Purpose
+from lastword.ids import new_ulid
+from lastword.models import Kind, ListQuery, Memory, NewMemory, RecallQuery
+from lastword.service import MemoryService
 
 HERE = Path(__file__).parent
 RESULTS_MD = HERE / "results" / "scale.md"
@@ -130,7 +130,7 @@ def main() -> None:
     parser.add_argument("--sizes", type=int, nargs="+", default=[1_000, 10_000, 50_000, 200_000])
     sizes = parser.parse_args().sizes
     results = {}
-    with tempfile.TemporaryDirectory(prefix="vigente-scale-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="lastword-scale-") as tmp:
         for size in sizes:
             print(f"{size} memorias…", flush=True)
             results[size] = measure(size, Path(tmp))
@@ -150,7 +150,7 @@ def main() -> None:
         "# Latencia y escala",
         "",
         "Generado por `eval/scale.py`. Vectores aleatorios de 768 dimensiones (las de "
-        "embeddinggemma): mide el coste de Vigente sin el del modelo de embeddings.",
+        "embeddinggemma): mide el coste de Lastword sin el del modelo de embeddings.",
         "",
         f"- Fecha: {datetime.now(UTC):%Y-%m-%d}",
         f"- Máquina: {platform.machine()}, {platform.system()} {platform.release()}, "

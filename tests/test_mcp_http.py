@@ -17,11 +17,11 @@ import pytest
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
-from vigente.mcp_server import RequireToken
+from lastword.mcp_server import RequireToken
 
 TOKEN = "t" * 40
 PUBLIC_HOST = "memoria.example.com"
-SERVER = [sys.executable, "-m", "vigente.mcp_server"]
+SERVER = [sys.executable, "-m", "lastword.mcp_server"]
 
 
 async def _ok_app(scope: MutableMapping[str, Any], receive: Any, send: Any) -> None:
@@ -83,9 +83,9 @@ def _free_port() -> int:
 
 
 def _env(tmp_path: Path, **overrides: str) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("VIGENTE_")}
-    env |= {"VIGENTE_DB": str(tmp_path / "http.db"), "VIGENTE_EMBED_MODEL": "none"}
-    return env | {"VIGENTE_WORKSPACE": "equipo", "VIGENTE_TOKEN": TOKEN} | overrides
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LASTWORD_")}
+    env |= {"LASTWORD_DB": str(tmp_path / "http.db"), "LASTWORD_EMBED_MODEL": "none"}
+    return env | {"LASTWORD_WORKSPACE": "equipo", "LASTWORD_TOKEN": TOKEN} | overrides
 
 
 @pytest.fixture
@@ -156,14 +156,14 @@ def test_requests_without_the_token_are_refused(http_server: str) -> None:
 
 @pytest.mark.parametrize(
     ("lang", "expected"),
-    [("es", "hace falta VIGENTE_TOKEN"), ("en", "needs VIGENTE_TOKEN")],
+    [("es", "hace falta LASTWORD_TOKEN"), ("en", "needs LASTWORD_TOKEN")],
 )
 def test_http_refuses_to_start_without_a_long_token(
     tmp_path: Path, lang: str, expected: str
 ) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "vigente.mcp_server", "--http", "--port", str(_free_port())],
-        env=_env(tmp_path, VIGENTE_TOKEN="corto", VIGENTE_LANG=lang),
+        [sys.executable, "-m", "lastword.mcp_server", "--http", "--port", str(_free_port())],
+        env=_env(tmp_path, LASTWORD_TOKEN="corto", LASTWORD_LANG=lang),
         capture_output=True,
         text=True,
         timeout=60,
@@ -174,8 +174,8 @@ def test_http_refuses_to_start_without_a_long_token(
 
 def test_help_follows_the_language(tmp_path: Path) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "vigente.mcp_server", "--help"],
-        env=_env(tmp_path, VIGENTE_LANG="en"),
+        [sys.executable, "-m", "lastword.mcp_server", "--help"],
+        env=_env(tmp_path, LASTWORD_LANG="en"),
         capture_output=True,
         text=True,
         timeout=60,

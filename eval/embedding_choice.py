@@ -1,6 +1,6 @@
 """Mini-benchmark para elegir el modelo de embeddings y calibrar sus umbrales.
 
-Mide, con el código real de Vigente y un conjunto pequeño escrito a mano en español:
+Mide, con el código real de Lastword y un conjunto pequeño escrito a mano en español:
 
 1. Detección de posibles reemplazos: ¿propone el hecho correcto cuando llega una
    actualización, sin proponer nada ante frases del mismo tema o sin relación?
@@ -28,10 +28,10 @@ from typing import Any
 import httpx
 from metrics import cosine, rank_metrics
 
-from vigente import retrieval, store
-from vigente.embeddings import OpenAICompatibleEmbedder, Purpose
-from vigente.models import Kind, NewMemory, RecallQuery, SearchMode
-from vigente.service import MemoryService
+from lastword import retrieval, store
+from lastword.embeddings import OpenAICompatibleEmbedder, Purpose
+from lastword.models import Kind, NewMemory, RecallQuery, SearchMode
+from lastword.service import MemoryService
 
 HERE = Path(__file__).parent
 DATA = HERE / "data" / "embedding_choice.json"

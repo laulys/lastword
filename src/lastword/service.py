@@ -18,9 +18,9 @@ from typing import NoReturn
 
 from pydantic import TypeAdapter
 
-from vigente import retrieval, safety, store
-from vigente.embeddings import Embedder, Purpose
-from vigente.errors import (
+from lastword import retrieval, safety, store
+from lastword.embeddings import Embedder, Purpose
+from lastword.errors import (
     AlreadySupersededError,
     ConfigError,
     EmbeddingError,
@@ -30,9 +30,9 @@ from vigente.errors import (
     PendingConfirmationError,
     ProtectedError,
 )
-from vigente.i18n import tr
-from vigente.ids import new_ulid
-from vigente.models import (
+from lastword.i18n import tr
+from lastword.ids import new_ulid
+from lastword.models import (
     MAX_LIST_LIMIT,
     ForgetResult,
     Hit,
@@ -352,7 +352,7 @@ class MemoryService:
                 store.add_contradictions(self._conn, request.new_id, request.old_ids)
         raise PendingConfirmationError(
             tr(
-                "Cambio pendiente {id}: lo tiene que confirmar una persona con `vigente accept`. "
+                "Cambio pendiente {id}: lo tiene que confirmar una persona con `lastword accept`. "
                 "El hecho anterior sigue vigente. No lo reintentes; díselo al usuario.",
                 id=change.id,
             ),
@@ -502,7 +502,7 @@ class MemoryService:
                 raise ProtectedError(
                     tr(
                         "Lo guardó o confirmó una persona: solo una persona puede olvidarlo, con "
-                        "`vigente forget {id}`.",
+                        "`lastword forget {id}`.",
                         id=memory_id,
                     )
                 )
@@ -643,7 +643,7 @@ class MemoryService:
             warnings.append(
                 tr(
                     "Cambios pendientes de que los confirme una persona: {ids}. Mientras tanto, "
-                    "sigue valiendo lo que aparece aquí. Se revisan con `vigente pending`.",
+                    "sigue valiendo lo que aparece aquí. Se revisan con `lastword pending`.",
                     ids=", ".join(waiting),
                 )
             )
@@ -692,7 +692,7 @@ class MemoryService:
             if store.count_without_vector(self._conn, self.workspace_id, None):
                 warnings.append(
                     tr(
-                        "No hay vectores de {model} ({dim} dimensiones). Ejecuta `vigente "
+                        "No hay vectores de {model} ({dim} dimensiones). Ejecuta `lastword "
                         "reindex`. Se usó solo la búsqueda de texto.",
                         model=self._embedder.model,
                         dim=len(vector),
@@ -1012,7 +1012,7 @@ def _warn_about_flags(result: RecallResult) -> RecallResult:
 def _without_vector_warning(model: str) -> str:
     return tr(
         "Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para no "
-        "perderlas. Ejecuta `vigente reindex`.",
+        "perderlas. Ejecuta `lastword reindex`.",
         model=model,
     )
 

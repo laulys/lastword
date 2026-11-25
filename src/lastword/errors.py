@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 
-class VigenteError(Exception):
+class LastwordError(Exception):
     """Error esperado: la operación no se puede hacer tal como se pidió."""
 
     code: ClassVar[str] = "error"
@@ -27,59 +27,59 @@ class VigenteError(Exception):
         return data
 
 
-class NotFoundError(VigenteError):
+class NotFoundError(LastwordError):
     code = "not_found"
 
 
-class NotSupersedableError(VigenteError):
+class NotSupersedableError(LastwordError):
     code = "not_supersedable"
 
 
-class AlreadySupersededError(VigenteError):
+class AlreadySupersededError(LastwordError):
     code = "already_superseded"
 
 
-class PendingConfirmationError(VigenteError):
+class PendingConfirmationError(LastwordError):
     """El cambio quedó pendiente de que lo confirme una persona (ADR-0011)."""
 
     code = "pending_confirmation"
 
 
-class ProtectedError(VigenteError):
+class ProtectedError(LastwordError):
     """Lo guardó o confirmó una persona, y solo una persona puede hacerlo (ADR-0011)."""
 
     code = "protected"
 
 
-class InvalidValidityError(VigenteError):
+class InvalidValidityError(LastwordError):
     code = "invalid_validity"
 
 
-class SchemaVersionError(VigenteError):
+class SchemaVersionError(LastwordError):
     code = "schema_version"
 
 
-class ConfigError(VigenteError):
+class ConfigError(LastwordError):
     code = "config"
 
 
-class DatabaseError(VigenteError):
+class DatabaseError(LastwordError):
     """SQLite no pudo abrir el archivo, o está ocupado por otro proceso."""
 
     code = "database"
 
 
-class EmbeddingError(VigenteError):
+class EmbeddingError(LastwordError):
     code = "embedding_unavailable"
 
 
-class SecretDetectedError(VigenteError):
+class SecretDetectedError(LastwordError):
     """El texto parece contener una clave o contraseña (ADR-0007)."""
 
     code = "secret_detected"
 
 
-class HiddenCharactersError(VigenteError):
+class HiddenCharactersError(LastwordError):
     """El texto contiene caracteres invisibles que pueden esconder instrucciones (ADR-0007)."""
 
     code = "hidden_characters"

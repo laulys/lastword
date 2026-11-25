@@ -1,8 +1,8 @@
-"""Idioma de lo que lee una persona: la CLI, los errores, los avisos, `vigente doctor` y el
-arranque de `vigente-mcp`.
+"""Idioma de lo que lee una persona: la CLI, los errores, los avisos, `lastword doctor` y el
+arranque de `lastword-mcp`.
 
 El texto fuente está en español y `EN` da su versión en inglés. El idioma sale de
-`VIGENTE_LANG` (`es` o `en`) y, si no está, del idioma del sistema (`LC_ALL`, `LC_MESSAGES`,
+`LASTWORD_LANG` (`es` o `en`) y, si no está, del idioma del sistema (`LC_ALL`, `LC_MESSAGES`,
 `LANG`). Lo que lee el agente (instrucciones y descripciones del servidor MCP) se queda en
 español: los modelos entienden los dos.
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 
-LANG_ENV = "VIGENTE_LANG"
+LANG_ENV = "LASTWORD_LANG"
 LANGUAGES = ("es", "en")
 
 
@@ -39,7 +39,7 @@ EN: dict[str, str] = {
     "vigente": "current",
     "Guardada": "Saved",
     "Reemplazada": "Superseded",
-    "Vigente: memoria para agentes de IA que sabe qué sigue siendo verdad.": "Vigente: memory for AI agents that knows what is still true.",
+    "Lastword: memoria para agentes de IA que sabe qué sigue siendo verdad.": "Lastword: memory for AI agents that knows what is still true.",
     "desde {date}": "since {date}",
     "futura": "future",
     "reemplazada": "superseded",
@@ -59,13 +59,13 @@ EN: dict[str, str] = {
     "Lista las memorias marcadas: posibles órdenes al agente, caracteres ocultos o secretos.": "List flagged memories: possible orders to the agent, hidden characters or secrets.",
     "Comprueba la consistencia de la base de datos y de sus índices.": "Check the consistency of the database and its indexes.",
     "Cuenta memorias del workspace.": "Count the memories in the workspace.",
-    "\nPosibles reemplazos. Si lo que acabas de guardar deja obsoleto alguno, usa [bold]vigente supersede <id> --by {id}[/]:": "\nPossible replacements. If what you just saved makes any of them outdated, use [bold]vigente supersede <id> --by {id}[/]:",
+    "\nPosibles reemplazos. Si lo que acabas de guardar deja obsoleto alguno, usa [bold]lastword supersede <id> --by {id}[/]:": "\nPossible replacements. If what you just saved makes any of them outdated, use [bold]lastword supersede <id> --by {id}[/]:",
     " Si de verdad quieres guardarlo, repite el comando con --allow-secret.": " If you really want to save it, repeat the command with --allow-secret.",
     "búsqueda: {mode}": "search: {mode}",
     "¿Borrar para siempre {id} y todas sus versiones?": "Delete {id} and all its versions for good?",
     "memorias marcadas: {n}": "flagged memories: {n}",
     "motivo": "reason",
-    "Si alguna no debería estar en la memoria, bórrala con vigente forget <id>.": "If any of them should not be in the memory, delete it with vigente forget <id>.",
+    "Si alguna no debería estar en la memoria, bórrala con lastword forget <id>.": "If any of them should not be in the memory, delete it with lastword forget <id>.",
     "tipo": "kind",
     "cantidad": "count",
     "Memoria lista en [bold]{db}[/], workspace [bold]{workspace}[/]": "Memory ready at [bold]{db}[/], workspace [bold]{workspace}[/]",
@@ -77,7 +77,7 @@ EN: dict[str, str] = {
     "Espacio de memoria aislado.": "Isolated memory space.",
     "Salida en JSON.": "JSON output.",
     "Modelo de embeddings (Ollama u otro servicio compatible con OpenAI). 'none' desactiva la búsqueda semántica.": "Embedding model (Ollama or another OpenAI-compatible service). 'none' turns semantic search off.",
-    "URL del servicio de embeddings. Si no es local, exige VIGENTE_ALLOW_REMOTE=1.": "URL of the embedding service. If it is not local, it requires VIGENTE_ALLOW_REMOTE=1.",
+    "URL del servicio de embeddings. Si no es local, exige LASTWORD_ALLOW_REMOTE=1.": "URL of the embedding service. If it is not local, it requires LASTWORD_ALLOW_REMOTE=1.",
     "vector (por defecto), hybrid (vector + texto) o text.": "vector (default), hybrid (vector + text) or text.",
     "Aviso:": "Warning:",
     "Texto de la memoria.": "Text of the memory.",
@@ -112,7 +112,7 @@ EN: dict[str, str] = {
     "El servicio devolvió valores no numéricos (NaN o infinito).": "The service returned non-numeric values (NaN or infinity).",
     "El servicio devolvió un vector nulo (todo ceros).": "The service returned a null vector (all zeros).",
     "Falta el nombre del modelo de embeddings.": "The embedding model name is missing.",
-    "{url} no es una dirección local. Para enviar el contenido de las memorias a un servicio remoto, activa VIGENTE_ALLOW_REMOTE=1.": "{url} is not a local address. To send the content of memories to a remote service, set VIGENTE_ALLOW_REMOTE=1.",
+    "{url} no es una dirección local. Para enviar el contenido de las memorias a un servicio remoto, activa LASTWORD_ALLOW_REMOTE=1.": "{url} is not a local address. To send the content of memories to a remote service, set LASTWORD_ALLOW_REMOTE=1.",
     "El servicio devolvió vectores de dimensiones distintas.": "The service returned vectors of different dimensions.",
     "Respuesta de embeddings con formato inesperado.": "Embedding response with an unexpected format.",
     "tiempo de espera agotado": "timed out",
@@ -131,7 +131,7 @@ EN: dict[str, str] = {
     "Con --json no se puede preguntar: confirma el borrado con --yes.": "With --json there is no prompt: confirm the deletion with --yes.",
     "{id} lo acaba de confirmar una persona. Vuelve a pedirlo.": "{id} has just been confirmed by a person. Ask again.",
     "Hay demasiados cambios pendientes. Una persona tiene que revisarlos.": "There are too many pending changes. A person has to review them.",
-    "Cambio pendiente {id}: lo tiene que confirmar una persona con `vigente accept`. El hecho anterior sigue vigente. No lo reintentes; díselo al usuario.": "Pending change {id}: a person has to confirm it with `vigente accept`. The previous fact is still current. Do not retry; tell the user.",
+    "Cambio pendiente {id}: lo tiene que confirmar una persona con `lastword accept`. El hecho anterior sigue vigente. No lo reintentes; díselo al usuario.": "Pending change {id}: a person has to confirm it with `lastword accept`. The previous fact is still current. Do not retry; tell the user.",
     "Solo lo puede hacer una persona, desde la CLI.": "Only a person can do this, from the CLI.",
     "No existe el cambio pendiente {id}.": "Pending change {id} does not exist.",
     "Da por bueno un hecho que guardó un agente: solo una persona lo cambia.": "Vouch for a fact an agent saved: only a person can change it.",
@@ -146,10 +146,10 @@ EN: dict[str, str] = {
     "etiquetas": "tags",
     "aviso": "warning",
     "ya no se puede aceptar: algo cambió después": "can no longer be accepted: something changed afterwards",
-    "La memoria que se pedía usar sigue guardada: bórrala con vigente forget {id} si no es cierta.": "The memory it asked to use is still saved: delete it with vigente forget {id} if it is not true.",
+    "La memoria que se pedía usar sigue guardada: bórrala con lastword forget {id} si no es cierta.": "The memory it asked to use is still saved: delete it with lastword forget {id} if it is not true.",
     "Lista los cambios que esperan a que una persona los acepte o rechace.": "List the changes waiting for a person to accept or reject them.",
     "[green]Ningún cambio pendiente.[/]": "[green]No pending changes.[/]",
-    "Decide con vigente accept <id> o vigente reject <id>.": "Decide with vigente accept <id> or vigente reject <id>.",
+    "Decide con lastword accept <id> o lastword reject <id>.": "Decide with lastword accept <id> or lastword reject <id>.",
     "Acepta un cambio pendiente: reemplaza el hecho y pasa a ser tuyo.": "Accept a pending change: it replaces the fact and becomes yours.",
     "Id del cambio pendiente.": "Id of the pending change.",
     "Rechaza un cambio pendiente y borra su texto.": "Reject a pending change and delete its text.",
@@ -158,19 +158,19 @@ EN: dict[str, str] = {
     "persona": "person",
     "agente": "agent",
     "de fuera": "outside",
-    "Lo guardó o confirmó una persona: solo una persona puede olvidarlo, con `vigente forget {id}`.": "A person saved or confirmed it: only a person can forget it, with `vigente forget {id}`.",
+    "Lo guardó o confirmó una persona: solo una persona puede olvidarlo, con `lastword forget {id}`.": "A person saved or confirmed it: only a person can forget it, with `lastword forget {id}`.",
     "{id} puede contradecir a {facts}, más fiable: si se contradicen, vale lo segundo. Díselo al usuario.": "{id} may contradict {facts}, which is more trusted: if they disagree, the latter holds. Tell the user.",
-    "Cambios pendientes de que los confirme una persona: {ids}. Mientras tanto, sigue valiendo lo que aparece aquí. Se revisan con `vigente pending`.": "Changes waiting for a person to confirm them: {ids}. Meanwhile, what appears here still holds. Review them with `vigente pending`.",
+    "Cambios pendientes de que los confirme una persona: {ids}. Mientras tanto, sigue valiendo lo que aparece aquí. Se revisan con `lastword pending`.": "Changes waiting for a person to confirm them: {ids}. Meanwhile, what appears here still holds. Review them with `lastword pending`.",
     "entrada": "input",
     "{env} necesita al menos {n} caracteres": "{env} needs at least {n} characters",
-    "Servidor MCP de Vigente. Por defecto, por stdio.": "Vigente's MCP server. By default, over stdio.",
+    "Servidor MCP de Lastword. Por defecto, por stdio.": "Lastword's MCP server. By default, over stdio.",
     "Servir por HTTP en /mcp. Exige {env}.": "Serve over HTTP at /mcp. Requires {env}.",
     "Con --http: dirección de escucha.": "With --http: address to listen on.",
     "Con --http: puerto.": "With --http: port.",
     "Con --http: nombre público con el que llegan las peticiones si hay un proxy HTTPS delante, por ejemplo memoria.example.com (se puede repetir).": "With --http: public name the requests arrive with when an HTTPS proxy sits in front, for example memory.example.com (can be repeated).",
-    "vigente-mcp: para servir por HTTP hace falta {env} con al menos {n} caracteres (por ejemplo, la salida de `openssl rand -hex 32`).": "vigente-mcp: serving over HTTP needs {env} with at least {n} characters (for example, the output of `openssl rand -hex 32`).",
-    "vigente-mcp: configuración no válida: {error}": "vigente-mcp: invalid configuration: {error}",
-    "vigente-mcp: escuchando fuera de este ordenador. Ponlo detrás de HTTPS: sin cifrado, el token viaja en claro.": "vigente-mcp: listening beyond this computer. Put it behind HTTPS: without encryption, the token travels in clear text.",
+    "lastword-mcp: para servir por HTTP hace falta {env} con al menos {n} caracteres (por ejemplo, la salida de `openssl rand -hex 32`).": "lastword-mcp: serving over HTTP needs {env} with at least {n} characters (for example, the output of `openssl rand -hex 32`).",
+    "lastword-mcp: configuración no válida: {error}": "lastword-mcp: invalid configuration: {error}",
+    "lastword-mcp: escuchando fuera de este ordenador. Ponlo detrás de HTTPS: sin cifrado, el token viaja en claro.": "lastword-mcp: listening beyond this computer. Put it behind HTTPS: without encryption, the token travels in clear text.",
     "No se guardó: el texto contiene {what}, que pueden esconder instrucciones. Quítalos y vuelve a intentarlo.": "Not saved: the text contains {what}, which can hide instructions. Remove them and try again.",
     "No se guardó: parece contener {what}. Guarda dónde está el secreto (por ejemplo, «la clave de Stripe está en el gestor de contraseñas»), no el secreto.": "Not saved: it seems to contain {what}. Save where the secret is (for example, \u201cthe Stripe key is in the password manager\u201d), not the secret.",
     " y ": " and ",
@@ -181,7 +181,7 @@ EN: dict[str, str] = {
     "La versión nueva debe empezar después de que empezaran las anteriores ({start}).": "The new version must start after the previous ones started ({start}).",
     "Un episode registra algo que ya pasó: valid_from no puede estar en el futuro.": "An episode records something that already happened: valid_from cannot be in the future.",
     "No hay modelo de embeddings configurado.": "No embedding model is configured.",
-    "Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para no perderlas. Ejecuta `vigente reindex`.": "Some memories have no {model} vector: text search was combined in so they are not lost. Run `vigente reindex`.",
+    "Hay memorias sin vector de {model}: se combinó con la búsqueda de texto para no perderlas. Ejecuta `lastword reindex`.": "Some memories have no {model} vector: text search was combined in so they are not lost. Run `lastword reindex`.",
     "No existe la memoria {id} en este workspace.": "Memory {id} does not exist in this workspace.",
     "Solo los fact se pueden reemplazar; un episode registra algo que ya pasó.": "Only facts can be superseded; an episode records something that already happened.",
     "{old} ya fue reemplazada; la versión vigente es {current}.": "{old} was already superseded; the current version is {current}.",
@@ -190,10 +190,10 @@ EN: dict[str, str] = {
     "Borrado: ya no se puede leer ni buscar. Otra conexión está usando la base, así que el texto sigue en sus archivos hasta que se cierre.": "Deleted: it can no longer be read or searched. Another connection is using the database, so the text stays in its files until it closes.",
     "{id} puede contradecir a {n} hechos más que no se muestran: no te fíes de ella sin preguntar al usuario.": "{id} may contradict {n} more facts that are not shown: do not rely on it without asking the user.",
     "Hay un cambio pendiente ({id}) que lo nombra junto a un hecho más fiable. Antes lo tiene que aceptar o rechazar una persona.": "A pending change ({id}) names it together with a more trusted fact. A person has to accept or reject it first.",
-    "No hay vectores de {model} ({dim} dimensiones). Ejecuta `vigente reindex`. Se usó solo la búsqueda de texto.": "There are no {model} vectors ({dim} dimensions). Run `vigente reindex`. Only text search was used.",
+    "No hay vectores de {model} ({dim} dimensiones). Ejecuta `lastword reindex`. Se usó solo la búsqueda de texto.": "There are no {model} vectors ({dim} dimensions). Run `lastword reindex`. Only text search was used.",
     "{error} Se usó solo la búsqueda de texto.": "{error} Only text search was used.",
-    "Este Python no permite cargar extensiones de SQLite y Vigente necesita sqlite-vec. Usa un Python gestionado por uv.": "This Python cannot load SQLite extensions, and Vigente needs sqlite-vec. Use a Python managed by uv.",
-    "La base usa el esquema v{found}, más nuevo que el que conoce esta versión de Vigente (v{known}).": "The database uses schema v{found}, newer than the one this version of Vigente knows (v{known}).",
+    "Este Python no permite cargar extensiones de SQLite y Lastword necesita sqlite-vec. Usa un Python gestionado por uv.": "This Python cannot load SQLite extensions, and Lastword needs sqlite-vec. Use a Python managed by uv.",
+    "La base usa el esquema v{found}, más nuevo que el que conoce esta versión de Lastword (v{known}).": "The database uses schema v{found}, newer than the one this version of Lastword knows (v{known}).",
     "{n} referencias rotas entre memorias": "{n} broken references between memories",
     "otros usuarios del equipo pueden leer {file}; ejecuta chmod 600 sobre él": "other users of this computer can read {file}; run chmod 600 on it",
     "{n} entradas del índice de texto sin memoria": "{n} text index entries without a memory",

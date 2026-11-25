@@ -9,16 +9,16 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
-from vigente import store
-from vigente.errors import (
+from lastword import store
+from lastword.errors import (
     AlreadySupersededError,
     InvalidValidityError,
     NotFoundError,
     NotSupersedableError,
 )
-from vigente.models import Kind, ListQuery, NewMemory, RecallQuery, Status, SupersedeRequest
-from vigente.service import MemoryService
+from lastword.models import Kind, ListQuery, NewMemory, RecallQuery, Status, SupersedeRequest
+from lastword.service import MemoryService
+from tests.helpers import T0, FakeClock, disk_bytes, recall_ids, remember, supersede
 
 
 class TestRemember:

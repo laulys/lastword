@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from vigente.models import MAX_CONTENT_CHARS
+from lastword.models import MAX_CONTENT_CHARS
 
 PATH = Path(__file__).parent / "datasets" / "longmemeval_s_cleaned.json"
 
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     # Precalcula todos los embeddings de E2 (unos 25 min la primera vez; luego, caché).
     from cache import CachedEmbedder
 
-    from vigente.config import EmbeddingSettings
+    from lastword.config import EmbeddingSettings
 
     items, truncated = load()
     print(f"{len(items)} preguntas, {truncated} mensajes recortados a {MAX_CONTENT_CHARS}")

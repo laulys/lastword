@@ -1,6 +1,6 @@
 """Graba la demo del README ejecutando la CLI de verdad: nada está simulado salvo el tecleo.
 
-Genera demo/vigente.cast (formato asciinema) y demo/vigente.gif.
+Genera demo/lastword.cast (formato asciinema) y demo/lastword.gif.
 Requisitos: Ollama con embeddinggemma y `agg` (brew install agg).
 
 Uso:
@@ -19,8 +19,8 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
-CAST = HERE / "vigente.cast"
-GIF = HERE / "vigente.gif"
+CAST = HERE / "lastword.cast"
+GIF = HERE / "lastword.gif"
 COLS, ROWS = 96, 30
 TYPING = 0.03  # segundos por tecla
 CLEAR = "\x1b[2J\x1b[H"
@@ -55,13 +55,14 @@ class Cast:
 
 def main() -> None:
     cast = Cast()
-    with tempfile.TemporaryDirectory(prefix="vigente-demo-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="lastword-demo-") as tmp:
         # Configuración fija: la demo muestra los valores por defecto, no los de quien la graba.
-        inherited = {k: v for k, v in os.environ.items() if not k.startswith("VIGENTE_")}
+        ours = ("LASTWORD_", "VIGENTE_")
+        inherited = {k: v for k, v in os.environ.items() if not k.startswith(ours)}
         env = inherited | {
-            "VIGENTE_DB": str(Path(tmp) / "demo.db"),
-            "VIGENTE_WORKSPACE": "demo",
-            "VIGENTE_LANG": "es",  # la demo está en español, sea cual sea el idioma del sistema
+            "LASTWORD_DB": str(Path(tmp) / "demo.db"),
+            "LASTWORD_WORKSPACE": "demo",
+            "LASTWORD_LANG": "es",  # la demo está en español, sea cual sea el idioma del sistema
             "COLUMNS": str(COLS),
             "FORCE_COLOR": "1",
             "TERM": "xterm-256color",
@@ -73,10 +74,10 @@ def main() -> None:
 
         def command(*args: str) -> str:
             cast.out("$ ", 0.3)
-            cast.type("vigente " + " ".join(shlex.quote(a) for a in args))
+            cast.type("lastword " + " ".join(shlex.quote(a) for a in args))
             cast.out("\n")
             result = subprocess.run(
-                [sys.executable, "-m", "vigente", *args],
+                [sys.executable, "-m", "lastword", *args],
                 env=env, capture_output=True, text=True, check=True,
             )  # fmt: skip
             output = result.stdout + result.stderr

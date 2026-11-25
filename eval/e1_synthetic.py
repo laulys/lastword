@@ -22,11 +22,11 @@ from exact_cases import has_codes
 from metrics import cosine, f_beta, pct, rank_metrics
 from synthetic import Dataset, Distractor, Question, Version, generate
 
-from vigente import retrieval, store
-from vigente.config import EmbeddingSettings
-from vigente.embeddings import Embedder, OpenAICompatibleEmbedder, profile_for
-from vigente.models import Hit, Kind, Memory, NewMemory, SupersedeRequest
-from vigente.service import MemoryService
+from lastword import retrieval, store
+from lastword.config import EmbeddingSettings
+from lastword.embeddings import Embedder, OpenAICompatibleEmbedder, profile_for
+from lastword.models import Hit, Kind, Memory, NewMemory, SupersedeRequest
+from lastword.service import MemoryService
 
 HERE = Path(__file__).parent
 RESULTS_MD = HERE / "results" / "e1_synthetic.md"
@@ -41,7 +41,7 @@ CURRENT_THRESHOLD = 0.51  # el del ADR-0004
 MAX_RECALL5_DROP = 0.02  # regla de la tesis
 THRESHOLDS = [round(0.30 + 0.01 * i, 2) for i in range(66)]
 MODES = ("texto", "vector", "híbrida", "híbrida ponderada", "automática")  # automática: E4
-SYSTEMS = ("ingenua", "ingenua + recencia", "vigente")
+SYSTEMS = ("ingenua", "ingenua + recencia", "lastword")
 QUESTION_TYPES = ("presente", "con fecha", "todas")
 DEFAULT_MODE = "híbrida"  # el modo por defecto cuando se fijó el protocolo
 NEW_DEFAULT_MODE = "vector"  # el que sale de las reglas de decisión de este hito
@@ -149,14 +149,14 @@ class Tally:
 
 
 def evaluate(
-    dataset: Dataset, naive: Built, vigente: Built, vectors: list[list[float]]
+    dataset: Dataset, naive: Built, lastword: Built, vectors: list[list[float]]
 ) -> dict[tuple[str, str, str], dict[str, float]]:
     tallies: dict[tuple[str, str, str], Tally] = defaultdict(Tally)
     chains = dataset.chains
     for question, vector in zip(dataset.questions, vectors, strict=True):
         qtype = "presente" if question.as_of is None else "con fecha"
         for system in SYSTEMS:
-            built = vigente if system == "vigente" else naive
+            built = lastword if system == "lastword" else naive
             expected = built.ids[(question.chain, question.expected)]
             same_chain = {built.ids[(question.chain, v.index)] for v in chains[question.chain]}
             for mode in MODES:
@@ -237,12 +237,12 @@ def main() -> None:
     )
     dataset = generate()
     naive = build(dataset, embedder, link=False)
-    vigente = build(dataset, embedder, link=True)
-    assert vigente.service.doctor() == [] and naive.service.doctor() == []
+    lastword = build(dataset, embedder, link=True)
+    assert lastword.service.doctor() == [] and naive.service.doctor() == []
     vectors = embedder.embed([q.text for q in dataset.questions], "query")
-    results = evaluate(dataset, naive, vigente, vectors)
+    results = evaluate(dataset, naive, lastword, vectors)
 
-    sweeps = sweep(vigente.proposals)
+    sweeps = sweep(lastword.proposals)
     by_f1, by_f2 = best(sweeps, 1), best(sweeps, 2)
     validation = handwritten(embedder)
     current, proposed = validation[CURRENT_THRESHOLD], validation[by_f2.threshold]
@@ -251,13 +251,13 @@ def main() -> None:
     embedder.close()
 
     naive_default = results[("ingenua", DEFAULT_MODE, "todas")]
-    vigente_default = results[("vigente", DEFAULT_MODE, "todas")]
-    thesis = vigente_default["stale@1"] < naive_default["stale@1"] and (
-        vigente_default["recall@5"] >= naive_default["recall@5"] - MAX_RECALL5_DROP
+    lastword_default = results[("lastword", DEFAULT_MODE, "todas")]
+    thesis = lastword_default["stale@1"] < naive_default["stale@1"] and (
+        lastword_default["recall@5"] >= naive_default["recall@5"] - MAX_RECALL5_DROP
     )
     summary: dict[str, Any] = {
         "model": settings.model,
-        "mrr": {mode: results[("vigente", mode, "todas")]["mrr"] for mode in MODES},
+        "mrr": {mode: results[("lastword", mode, "todas")]["mrr"] for mode in MODES},
         "thesis_holds": thesis,
         "threshold": {"current": CURRENT_THRESHOLD, "f2_best": by_f2.threshold, "chosen": chosen},
         "results": {" | ".join(key): value for key, value in results.items()},
@@ -295,9 +295,9 @@ def report(
     updates = sum(1 for v in dataset.versions if v.index > 0)
     as_of = sum(1 for q in dataset.questions if q.as_of is not None)
     naive = results[("ingenua", DEFAULT_MODE, "todas")]
-    vig = results[("vigente", DEFAULT_MODE, "todas")]
+    vig = results[("lastword", DEFAULT_MODE, "todas")]
     naive_new = results[("ingenua", NEW_DEFAULT_MODE, "todas")]
-    vig_new = results[("vigente", NEW_DEFAULT_MODE, "todas")]
+    vig_new = results[("lastword", NEW_DEFAULT_MODE, "todas")]
     lines = [
         "# E1. Datos sintéticos: ¿los reemplazos evitan datos obsoletos?",
         "",
@@ -316,7 +316,7 @@ def report(
         f"**La tesis {'se sostiene' if thesis else 'no se sostiene'}.** Con la búsqueda híbrida "
         f"(el modo por defecto cuando se fijó el protocolo), el primer resultado es una versión "
         f"obsoleta del dato en el {pct(naive['stale@1'])} de las preguntas con la memoria "
-        f"ingenua y en el {pct(vig['stale@1'])} con Vigente. Recall@5: {pct(naive['recall@5'])} "
+        f"ingenua y en el {pct(vig['stale@1'])} con Lastword. Recall@5: {pct(naive['recall@5'])} "
         f"frente a {pct(vig['recall@5'])}.",
         "",
         f"Con la búsqueda por vectores, que pasa a ser la de por defecto tras este hito "
@@ -350,7 +350,7 @@ def report(
         "| Sistema | Modo | Recall@1 | Recall@5 | MRR | 1.ª obsoleta |",
         "|---|---|---:|---:|---:|---:|",
     ]
-    for system in ("ingenua", "vigente"):
+    for system in ("ingenua", "lastword"):
         for mode in MODES:
             r = results[(system, mode, "todas")]
             lines.append(

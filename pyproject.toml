@@ -1,5 +1,5 @@
 [project]
-name = "vigente"
+name = "lastword"
 version = "1.4.0"
 description = "Memoria para agentes de IA que sabe qué sigue siendo verdad."
 readme = "README.md"
@@ -25,8 +25,8 @@ Repository = "https://github.com/laulys/vigente"
 Documentation = "https://github.com/laulys/vigente#readme"
 
 [project.scripts]
-vigente = "vigente.cli:app"
-vigente-mcp = "vigente.mcp_server:main"
+lastword = "lastword.cli:app"
+lastword-mcp = "lastword.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]
@@ -47,7 +47,7 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/vigente/i18n.py" = ["E501"]  # cada traducción, en una línea junto a su original
+"src/lastword/i18n.py" = ["E501"]  # cada traducción, en una línea junto a su original
 
 [tool.mypy]
 strict = true

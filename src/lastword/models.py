@@ -22,8 +22,8 @@ from pydantic import (
     model_validator,
 )
 
-from vigente import safety
-from vigente.i18n import tr
+from lastword import safety
+from lastword.i18n import tr
 
 MAX_CONTENT_CHARS = 4000
 MAX_TAGS = 20

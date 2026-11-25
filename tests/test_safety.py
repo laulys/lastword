@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from vigente import safety
-from vigente.errors import HiddenCharactersError, SecretDetectedError
-from vigente.models import MAX_CONTENT_CHARS
+from lastword import safety
+from lastword.errors import HiddenCharactersError, SecretDetectedError
+from lastword.models import MAX_CONTENT_CHARS
 
 ALNUM = string.ascii_letters + string.digits
 
@@ -376,7 +376,7 @@ class TestMorePasswords:
             "tokens = word\\_tokenize(text)",
             "API-Key: process.env.DATA_API_KEY",
             "tokens = [lemmatizer.lemmatize(token)",
-            "export VIGENTE_TOKEN=$(openssl rand -hex 32)",
+            "export LASTWORD_TOKEN=$(openssl rand -hex 32)",
             "token = Token(name)",
             "token = b64encode(x).decode()",
             "nextToken = tokens[idx + 1]",

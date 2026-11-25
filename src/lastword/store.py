@@ -23,9 +23,9 @@ from typing import Any
 
 import sqlite_vec
 
-from vigente.errors import ConfigError, DatabaseError, SchemaVersionError
-from vigente.i18n import tr
-from vigente.models import MAX_DIM, Kind, Memory, Origin, PendingChange, Status
+from lastword.errors import ConfigError, DatabaseError, SchemaVersionError
+from lastword.i18n import tr
+from lastword.models import MAX_DIM, Kind, Memory, Origin, PendingChange, Status
 
 OPEN_END_MS = 253_402_300_799_999  # 9999-12-31T23:59:59.999Z
 BUSY_TIMEOUT_MS = 5000  # cuánto espera una conexión a que otra suelte la base
@@ -183,7 +183,7 @@ def _load_sqlite_vec(conn: sqlite3.Connection) -> None:
     if not hasattr(conn, "enable_load_extension"):
         raise ConfigError(
             tr(
-                "Este Python no permite cargar extensiones de SQLite y Vigente necesita "
+                "Este Python no permite cargar extensiones de SQLite y Lastword necesita "
                 "sqlite-vec. Usa un Python gestionado por uv."
             )
         )
@@ -292,7 +292,7 @@ def _check_version(version: int) -> None:
         raise SchemaVersionError(
             tr(
                 "La base usa el esquema v{found}, más nuevo que el que conoce esta versión de "
-                "Vigente (v{known}).",
+                "Lastword (v{known}).",
                 found=version,
                 known=LATEST_SCHEMA_VERSION,
             )

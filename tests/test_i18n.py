@@ -12,10 +12,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from vigente import cli, safety
-from vigente.i18n import EN, language, tr
+from lastword import cli, safety
+from lastword.i18n import EN, language, tr
 
-SOURCE = Path(__file__).resolve().parent.parent / "src" / "vigente"
+SOURCE = Path(__file__).resolve().parent.parent / "src" / "lastword"
 MARKUP = re.compile(r"\[/?[a-z ]*\]")
 
 
@@ -82,20 +82,20 @@ def test_translations_keep_placeholders_and_markup(spanish: str) -> None:
 @pytest.mark.parametrize(
     ("environment", "expected"),
     [
-        ({"VIGENTE_LANG": "en", "LANG": "es_ES.UTF-8"}, "en"),
-        ({"VIGENTE_LANG": "ES"}, "es"),
+        ({"LASTWORD_LANG": "en", "LANG": "es_ES.UTF-8"}, "en"),
+        ({"LASTWORD_LANG": "ES"}, "es"),
         ({"LANG": "es_ES.UTF-8"}, "es"),
         ({"LANG": "en_US.UTF-8"}, "en"),
         ({"LANG": "C.UTF-8"}, "en"),
         ({"LC_ALL": "es_MX.UTF-8", "LANG": "en_US.UTF-8"}, "es"),
-        ({"VIGENTE_LANG": "fr", "LANG": "es_ES.UTF-8"}, "es"),
+        ({"LASTWORD_LANG": "fr", "LANG": "es_ES.UTF-8"}, "es"),
         ({}, "en"),
     ],
 )
-def test_language_comes_from_vigente_lang_or_the_system(
+def test_language_comes_from_lastword_lang_or_the_system(
     monkeypatch: pytest.MonkeyPatch, environment: dict[str, str], expected: str
 ) -> None:
-    for variable in ("VIGENTE_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
+    for variable in ("LASTWORD_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
         monkeypatch.delenv(variable, raising=False)
     for variable, value in environment.items():
         monkeypatch.setenv(variable, value)
@@ -106,21 +106,21 @@ def test_spanish_is_the_source_and_english_fills_the_same_placeholders(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert tr("{n} resultados", n=3) == "3 resultados"
-    monkeypatch.setenv("VIGENTE_LANG", "en")
+    monkeypatch.setenv("LASTWORD_LANG", "en")
     assert tr("{n} resultados", n=3) == "3 results"
     assert tr("un texto sin traducir") == "un texto sin traducir"
 
 
 def test_the_cli_speaks_english(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("VIGENTE_LANG", "en")
-    monkeypatch.setenv("VIGENTE_EMBED_MODEL", "none")
+    monkeypatch.setenv("LASTWORD_LANG", "en")
+    monkeypatch.setenv("LASTWORD_EMBED_MODEL", "none")
     runner = CliRunner()
-    options = ["--db", str(tmp_path / "vigente.db"), "--workspace", "en"]
+    options = ["--db", str(tmp_path / "lastword.db"), "--workspace", "en"]
 
     # La ayuda se traduce al cargar el módulo, así que se pide en un proceso nuevo: en este,
     # su idioma ya quedó fijado por el del sistema (el test fallaba en una máquina en español).
-    env = {**os.environ, "VIGENTE_LANG": "en"}
-    command = [sys.executable, "-m", "vigente", "--help"]
+    env = {**os.environ, "LASTWORD_LANG": "en"}
+    command = [sys.executable, "-m", "lastword", "--help"]
     shown = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
     assert "Save a memory" in shown.stdout
 

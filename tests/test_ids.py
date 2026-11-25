@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from vigente.ids import new_ulid
+from lastword.ids import new_ulid
 
 ULID = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 

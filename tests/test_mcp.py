@@ -14,10 +14,10 @@ from mcp.client.stdio import StdioServerParameters
 from mcp.server.mcpserver import MCPServer
 from mcp.types import TextContent
 
+from lastword.config import EmbeddingSettings, Settings
+from lastword.mcp_server import ESSENTIAL_CHARS, create_server
 from tests.fakes import DATABASE_WORDS, FakeEmbedder
 from tests.helpers import FakeClock
-from vigente.config import EmbeddingSettings, Settings
-from vigente.mcp_server import ESSENTIAL_CHARS, create_server
 
 TOOLS = {"remember", "recall", "supersede", "forget", "history", "list_memories"}
 
@@ -218,16 +218,16 @@ async def test_the_workspace_is_fixed_by_configuration(db_path: Path, clock: Fak
 
 
 def _server_env(tmp_path: Path, **overrides: str) -> dict[str, str]:
-    # Sin las VIGENTE_* de quien ejecuta los tests: su token o su modo de búsqueda no cuentan.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("VIGENTE_")}
-    env |= {"VIGENTE_DB": str(tmp_path / "stdio.db"), "VIGENTE_EMBED_MODEL": "none"}
-    return env | {"VIGENTE_WORKSPACE": "stdio", "VIGENTE_LANG": "es"} | overrides
+    # Sin las LASTWORD_* de quien ejecuta los tests: su token o su modo de búsqueda no cuentan.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LASTWORD_")}
+    env |= {"LASTWORD_DB": str(tmp_path / "stdio.db"), "LASTWORD_EMBED_MODEL": "none"}
+    return env | {"LASTWORD_WORKSPACE": "stdio", "LASTWORD_LANG": "es"} | overrides
 
 
 @pytest.mark.anyio
 async def test_runs_over_stdio_as_a_real_subprocess(tmp_path: Path) -> None:
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "vigente.mcp_server"], env=_server_env(tmp_path)
+        command=sys.executable, args=["-m", "lastword.mcp_server"], env=_server_env(tmp_path)
     )
     async with Client(params) as client:
         assert {tool.name for tool in (await client.list_tools()).tools} == TOOLS
@@ -238,13 +238,13 @@ async def test_runs_over_stdio_as_a_real_subprocess(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "override", [{"VIGENTE_WORKSPACE": "Workspace No Válido"}, {"VIGENTE_SEARCH_MODE": "magia"}]
+    "override", [{"LASTWORD_WORKSPACE": "Workspace No Válido"}, {"LASTWORD_SEARCH_MODE": "magia"}]
 )
 def test_bad_configuration_fails_at_startup_with_a_clear_message(
     tmp_path: Path, override: dict[str, str]
 ) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "vigente.mcp_server"],
+        [sys.executable, "-m", "lastword.mcp_server"],
         env=_server_env(tmp_path, **override),
         capture_output=True,
         text=True,
