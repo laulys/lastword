@@ -116,7 +116,7 @@ def test_upgrades_a_database_from_the_first_schema(db_path: Path) -> None:
     old.execute("INSERT INTO workspaces (id, created_at) VALUES ('test', 0)")
     old.close()
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 6
+    assert store.schema_version(conn) == store.LATEST_SCHEMA_VERSION == 7
     assert store.embedding_spaces(conn) == []
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(memories)")}
     assert "memories_superseded_by" in indexes  # v3: varias versiones anteriores
@@ -164,7 +164,7 @@ def test_upgrades_exact_vectors_to_two_stage_search(db_path: Path) -> None:
     raw.close()
 
     conn = store.connect(db_path)
-    assert store.schema_version(conn) == 6
+    assert store.schema_version(conn) == 7
     (space,) = store.embedding_spaces(conn)
     assert (space.table, space.exact) == ("vecb_1", "vecx_1")
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}

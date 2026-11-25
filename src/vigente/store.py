@@ -25,7 +25,7 @@ import sqlite_vec
 
 from vigente.errors import ConfigError, DatabaseError, SchemaVersionError
 from vigente.i18n import tr
-from vigente.models import Kind, Memory, Status
+from vigente.models import Kind, Memory, Origin, PendingChange, Status
 
 OPEN_END_MS = 253_402_300_799_999  # 9999-12-31T23:59:59.999Z
 BUSY_TIMEOUT_MS = 5000  # cuánto espera una conexión a que otra suelte la base
@@ -104,6 +104,40 @@ _MIGRATIONS: tuple[str | Callable[[sqlite3.Connection], None], ...] = (
     CREATE INDEX memories_supersedes ON memories(supersedes_id)
         WHERE supersedes_id IS NOT NULL;
     """,
+    # v7: quién puede cambiar un hecho (ADR-0011). Lo guardado desde la CLI es de una persona: el
+    # servidor MCP siempre escribió source = 'mcp'. Los cambios pendientes no son memorias, así
+    # que ninguna búsqueda los devuelve. Una contradicción une dos memorias vigentes parecidas
+    # de distinto rango, para que recall no devuelva nunca solo la menos fiable.
+    """
+    ALTER TABLE memories ADD COLUMN origin TEXT NOT NULL DEFAULT 'agent'
+        CHECK (origin IN ('person', 'agent', 'external'));
+    UPDATE memories SET origin = 'person' WHERE source = 'cli';
+    CREATE INDEX memories_ws_origin ON memories(workspace_id, origin);
+
+    CREATE TABLE pending_changes (
+        id           TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+        old_ids      TEXT NOT NULL,
+        content      TEXT,
+        new_id       TEXT,
+        reason       TEXT,
+        tags         TEXT,
+        source       TEXT,
+        confidence   REAL,
+        valid_from   INTEGER,
+        origin       TEXT NOT NULL CHECK (origin IN ('agent', 'external')),
+        created_at   INTEGER NOT NULL,
+        CHECK ((content IS NULL) != (new_id IS NULL))
+    );
+    CREATE INDEX pending_changes_ws ON pending_changes(workspace_id);
+
+    CREATE TABLE contradictions (
+        new_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        old_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        PRIMARY KEY (new_id, old_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX contradictions_old ON contradictions(old_id);
+    """,
 )
 LATEST_SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -123,6 +157,7 @@ _COLUMN_NAMES = (
     "superseded_by_id",
     "supersede_reason",
     "embedding_model",
+    "origin",
 )
 _COLUMNS = ", ".join(_COLUMN_NAMES)
 _M_COLUMNS = ", ".join(f"m.{name}" for name in _COLUMN_NAMES)
@@ -310,6 +345,7 @@ def insert_memory(conn: sqlite3.Connection, memory: Memory) -> int:
             memory.superseded_by_id,
             memory.supersede_reason,
             memory.embedding_model,
+            memory.origin.value,
         ),
     )
     seq = cursor.lastrowid
@@ -379,6 +415,12 @@ def delete_memories(conn: sqlite3.Connection, workspace_id: str, ids: Sequence[s
             (workspace_id, *ids),
         )
     ]
+    # Un cambio pendiente sobre lo olvidado también habla de ello: se va con todo lo demás.
+    conn.execute(
+        f"DELETE FROM pending_changes WHERE workspace_id = ? AND (new_id IN ({marks}) OR EXISTS "
+        f"(SELECT 1 FROM json_each(pending_changes.old_ids) WHERE value IN ({marks})))",
+        (workspace_id, *ids, *ids),
+    )
     conn.executemany("DELETE FROM memories_fts WHERE rowid = ?", [(seq,) for seq in seqs])
     for space in embedding_spaces(conn):
         conn.executemany(f"DELETE FROM {space.table} WHERE rowid = ?", [(seq,) for seq in seqs])
@@ -391,6 +433,165 @@ def delete_memories(conn: sqlite3.Connection, workspace_id: str, ids: Sequence[s
     # así los términos borrados no sobreviven en segmentos antiguos.
     conn.execute("INSERT INTO memories_fts (memories_fts) VALUES ('optimize')")
     return cursor.rowcount
+
+
+# --- origen, cambios pendientes y contradicciones (ADR-0011)
+
+
+def set_origin(conn: sqlite3.Connection, workspace_id: str, memory_id: str, origin: Origin) -> None:
+    conn.execute(
+        "UPDATE memories SET origin = ? WHERE workspace_id = ? AND id = ?",
+        (origin.value, workspace_id, memory_id),
+    )
+
+
+def insert_pending(conn: sqlite3.Connection, workspace_id: str, change: PendingChange) -> None:
+    conn.execute(
+        "INSERT INTO pending_changes (id, workspace_id, old_ids, content, new_id, reason, tags, "
+        "source, confidence, valid_from, origin, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            change.id,
+            workspace_id,
+            json.dumps(change.old_ids),
+            change.content,
+            change.new_id,
+            change.reason,
+            None if change.tags is None else json.dumps(change.tags, ensure_ascii=False),
+            change.source,
+            change.confidence,
+            None if change.valid_from is None else to_ms(change.valid_from),
+            change.origin.value,
+            to_ms(change.created_at),
+        ),
+    )
+
+
+def _to_pending(row: sqlite3.Row) -> PendingChange:
+    return PendingChange(
+        id=row["id"],
+        old_ids=json.loads(row["old_ids"]),
+        content=row["content"],
+        new_id=row["new_id"],
+        reason=row["reason"],
+        tags=None if row["tags"] is None else json.loads(row["tags"]),
+        source=row["source"],
+        confidence=row["confidence"],
+        valid_from=None if row["valid_from"] is None else from_ms(row["valid_from"]),
+        origin=Origin(row["origin"]),
+        created_at=from_ms(row["created_at"]),
+    )
+
+
+def list_pending(conn: sqlite3.Connection, workspace_id: str) -> list[PendingChange]:
+    rows = conn.execute(
+        "SELECT * FROM pending_changes WHERE workspace_id = ? ORDER BY created_at, id",
+        (workspace_id,),
+    )
+    return [_to_pending(row) for row in rows]
+
+
+def get_pending(
+    conn: sqlite3.Connection, workspace_id: str, pending_id: str
+) -> PendingChange | None:
+    row = conn.execute(
+        "SELECT * FROM pending_changes WHERE workspace_id = ? AND id = ?",
+        (workspace_id, pending_id),
+    ).fetchone()
+    return None if row is None else _to_pending(row)
+
+
+def delete_pending(conn: sqlite3.Connection, workspace_id: str, pending_id: str) -> None:
+    conn.execute(
+        "DELETE FROM pending_changes WHERE workspace_id = ? AND id = ?",
+        (workspace_id, pending_id),
+    )
+
+
+def ids_with_pending(conn: sqlite3.Connection, workspace_id: str, ids: Sequence[str]) -> list[str]:
+    """Cuáles de estas memorias tienen un cambio pendiente, en el mismo orden."""
+    marks = ", ".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT DISTINCT old.value FROM pending_changes, json_each(pending_changes.old_ids) AS old "
+        f"WHERE workspace_id = ? AND old.value IN ({marks})",
+        (workspace_id, *ids),
+    )
+    found = {str(row[0]) for row in rows}
+    return [memory_id for memory_id in ids if memory_id in found]
+
+
+def add_contradictions(conn: sqlite3.Connection, new_id: str, old_ids: Sequence[str]) -> None:
+    conn.executemany(
+        "INSERT OR IGNORE INTO contradictions (new_id, old_id) VALUES (?, ?)",
+        [(new_id, old_id) for old_id in old_ids],
+    )
+
+
+def inherit_contradictions(conn: sqlite3.Connection, old_id: str, new_id: str) -> None:
+    """Una versión nueva hereda los choques de la anterior, en los dos papeles: si no, bastaría
+    cambiar la memoria dudosa por otra, o el hecho fiable por su versión nueva, para perderlos."""
+    conn.execute(
+        "INSERT OR IGNORE INTO contradictions (new_id, old_id) "
+        "SELECT ?1, old_id FROM contradictions WHERE new_id = ?2 AND old_id != ?1 "
+        "UNION SELECT new_id, ?1 FROM contradictions WHERE old_id = ?2 AND new_id != ?1",
+        (new_id, old_id),
+    )
+
+
+def similar_facts(
+    conn: sqlite3.Connection,
+    space: EmbeddingSpace,
+    workspace_id: str,
+    vector: Sequence[float],
+    *,
+    origins: Sequence[Origin],
+    at_ms: int,
+    limit: int,
+) -> list[tuple[Memory, float]]:
+    """Los hechos vigentes de estos orígenes más parecidos, con la distancia exacta.
+
+    Se miran todos, sin la preselección por candidatos de `vector_search`: si no, muchas copias
+    de una mentira dejarían fuera al hecho verdadero.
+    """
+    marks = ", ".join("?" for _ in origins)
+    rows = conn.execute(
+        f"SELECT {_M_COLUMNS}, vec_distance_cosine(x.embedding, ?) AS distance "
+        # INDEXED BY: sin él, SQLite elige el índice de fechas y recorre el workspace entero.
+        "FROM memories AS m INDEXED BY memories_ws_origin "
+        f"JOIN {space.exact} AS x ON x.seq = m.seq "
+        f"WHERE m.workspace_id = ? AND m.origin IN ({marks}) AND m.kind = 'fact' "
+        "AND m.valid_from <= ? AND m.valid_to > ? AND distance IS NOT NULL "
+        "ORDER BY distance LIMIT ?",
+        (
+            sqlite_vec.serialize_float32(list(vector)),
+            workspace_id,
+            *(origin.value for origin in origins),
+            at_ms,
+            at_ms,
+            limit,
+        ),
+    ).fetchall()
+    return [(_to_memory(row), float(row["distance"])) for row in rows]
+
+
+def contradictions(
+    conn: sqlite3.Connection, workspace_id: str, new_ids: Sequence[str], *, at_ms: int
+) -> dict[str, list[Memory]]:
+    """Para cada memoria, los hechos con los que choca y que rigen en ese instante."""
+    marks = ", ".join("?" for _ in new_ids)
+    rows = conn.execute(
+        # CROSS JOIN: primero los choques, que son pocos. Con un JOIN normal, SQLite recorre el
+        # workspace por el índice de fechas: 8 ms por búsqueda con 50.000 memorias.
+        f"SELECT c.new_id AS contradicted_by, {_M_COLUMNS} FROM contradictions AS c "
+        "CROSS JOIN memories AS m ON m.id = c.old_id "
+        f"WHERE c.new_id IN ({marks}) AND m.workspace_id = ? "
+        "AND m.valid_from <= ? AND m.valid_to > ? ORDER BY m.seq",
+        (*new_ids, workspace_id, at_ms, at_ms),
+    ).fetchall()
+    found: dict[str, list[Memory]] = {}
+    for row in rows:
+        found.setdefault(str(row["contradicted_by"]), []).append(_to_memory(row))
+    return found
 
 
 # --- lectura
@@ -413,6 +614,7 @@ def _to_memory(row: sqlite3.Row) -> Memory:
         superseded_by_id=row["superseded_by_id"],
         supersede_reason=row["supersede_reason"],
         embedding_model=row["embedding_model"],
+        origin=Origin(row["origin"]),
     )
 
 
@@ -446,6 +648,7 @@ def fts_search(
     at_ms: int | None,
     kind: Kind | None = None,
     exclude_id: str | None = None,
+    origins: Sequence[Origin] | None = None,
 ) -> list[tuple[Memory, float]]:
     """Busca con BM25. `at_ms` = solo lo vigente en ese instante; None = todas las versiones.
 
@@ -469,6 +672,9 @@ def fts_search(
     if exclude_id is not None:
         sql.append("AND m.id != ?")
         params.append(exclude_id)
+    if origins is not None:
+        sql.append(f"AND m.origin IN ({', '.join('?' for _ in origins)})")
+        params += [origin.value for origin in origins]
     sql.append("ORDER BY rank LIMIT ?")
     params.append(limit)
     rows = conn.execute(" ".join(sql), params).fetchall()

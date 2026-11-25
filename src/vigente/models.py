@@ -45,6 +45,22 @@ class SearchMode(StrEnum):
     TEXT = "text"  # solo palabras (BM25)
 
 
+class Origin(StrEnum):
+    """De quién viene una memoria (ADR-0011). Lo fija la interfaz: por MCP nunca es `person`."""
+
+    PERSON = "person"  # una persona, desde la CLI, o algo que una persona confirmó
+    AGENT = "agent"  # un agente conectado
+    EXTERNAL = "external"  # contenido de fuera que un agente recogió: un correo, una página
+
+    @property
+    def rank(self) -> int:
+        """Cuanto mayor, más fiable. Un origen no puede cerrar un hecho de rango mayor."""
+        return _RANKS[self]
+
+
+_RANKS = {Origin.EXTERNAL: 0, Origin.AGENT: 1, Origin.PERSON: 2}
+
+
 class Status(StrEnum):
     ACTIVE = "active"  # no tiene sucesor
     SUPERSEDED = "superseded"  # otra memoria la reemplazó
@@ -197,6 +213,7 @@ class Memory(BaseModel):
     superseded_by_id: str | None = None
     supersede_reason: str | None = None  # por qué esta versión reemplazó a la anterior
     embedding_model: str | None = None  # modelo del último vector calculado; None = sin vector
+    origin: Origin = Origin.AGENT
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -215,6 +232,32 @@ class Hit(BaseModel):
     score: float  # relevancia para esta consulta (mayor = mejor; no comparable entre consultas)
     matched_by: list[str]  # "fts", "vector" o ambos
     similarity: float | None = None  # similitud coseno, si la encontró la búsqueda vectorial
+
+
+class PendingChange(BaseModel):
+    """Un cambio que un origen menos fiable pidió sobre hechos más fiables (ADR-0011).
+
+    No es una memoria: no sale en búsquedas, listas ni historial hasta que una persona lo acepta.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    old_ids: list[str]
+    content: str | None = None  # texto nuevo, o…
+    new_id: str | None = None  # …una memoria ya guardada
+    reason: str | None = None
+    tags: list[str] | None = None
+    source: str | None = None
+    confidence: float | None = None
+    valid_from: datetime | None = None
+    origin: Origin
+    created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def flags(self) -> list[str]:
+        return safety.flags([self.content, self.reason, self.source, *(self.tags or [])])
 
 
 class RememberResult(BaseModel):

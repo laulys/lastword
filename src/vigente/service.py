@@ -14,6 +14,7 @@ import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NoReturn
 
 from pydantic import TypeAdapter
 
@@ -26,6 +27,8 @@ from vigente.errors import (
     InvalidValidityError,
     NotFoundError,
     NotSupersedableError,
+    PendingConfirmationError,
+    ProtectedError,
 )
 from vigente.i18n import tr
 from vigente.ids import new_ulid
@@ -38,7 +41,9 @@ from vigente.models import (
     Memory,
     MemoryId,
     NewMemory,
+    Origin,
     Page,
+    PendingChange,
     RecallQuery,
     RecallResult,
     ReindexResult,
@@ -52,6 +57,9 @@ from vigente.models import (
 Clock = Callable[[], datetime]
 
 CANDIDATE_LIMIT = 3
+CLASH_LIMIT = 20  # hechos más fiables y parecidos que se apuntan como posible choque
+WEAKER_LIMIT = 200  # y menos fiables: muchas copias de una mentira previa a la verdad
+MAX_PENDING = 200  # cambios pendientes por workspace: nadie revisa más
 REINDEX_BATCH = 32
 _ONE_MS = timedelta(milliseconds=1)
 
@@ -84,7 +92,10 @@ class MemoryService:
         clock: Clock = utc_now,
         embedder: Embedder | None = None,
         search_mode: SearchMode = SearchMode.VECTOR,
+        origin: Origin = Origin.AGENT,
     ) -> None:
+        # `origin` lo fija la interfaz: la CLI es una persona y el servidor MCP, un agente.
+        self._origin = origin
         self._conn = conn
         self._clock = clock
         self._embedder = embedder
@@ -105,10 +116,18 @@ class MemoryService:
         clock: Clock = utc_now,
         embedder: Embedder | None = None,
         search_mode: SearchMode = SearchMode.VECTOR,
+        origin: Origin = Origin.AGENT,
     ) -> MemoryService:
         conn = store.connect(db_path)
         try:
-            return cls(conn, workspace_id, clock=clock, embedder=embedder, search_mode=search_mode)
+            return cls(
+                conn,
+                workspace_id,
+                clock=clock,
+                embedder=embedder,
+                search_mode=search_mode,
+                origin=origin,
+            )
         except BaseException:
             conn.close()
             raise
@@ -118,8 +137,11 @@ class MemoryService:
 
     # --- escritura
 
-    def remember(self, request: NewMemory, *, allow_secrets: bool = False) -> RememberResult:
-        """Guarda una memoria. `allow_secrets` solo lo usa una persona desde la CLI (ADR-0007)."""
+    def remember(
+        self, request: NewMemory, *, allow_secrets: bool = False, external: bool = False
+    ) -> RememberResult:
+        """Guarda una memoria. `allow_secrets` solo lo usa una persona desde la CLI (ADR-0007).
+        `external`: lo que se guarda viene de fuera (un correo, una página) (ADR-0011)."""
         safety.check_before_saving(
             [request.content, request.source, *request.tags], allow_secrets=allow_secrets
         )
@@ -139,6 +161,7 @@ class MemoryService:
             confidence=request.confidence,
             created_at=now,
             valid_from=valid_from,
+            origin=self._actor(external),
         )
         warnings: list[str] = []
         vector = self._embed(memory.content, "document", warnings)
@@ -150,31 +173,52 @@ class MemoryService:
         candidates = (
             self._possible_supersedes(stored, vector, warnings) if stored.kind is Kind.FACT else []
         )
+        self._note_clashes(stored, vector, warnings)
         return RememberResult(memory=stored, possible_supersedes=candidates, warnings=warnings)
 
     def supersede(
-        self, request: SupersedeRequest, *, allow_secrets: bool = False
+        self,
+        request: SupersedeRequest,
+        *,
+        allow_secrets: bool = False,
+        external: bool = False,
     ) -> SupersedeResult:
-        """Reemplaza uno o varios hechos vigentes por uno nuevo, sin editar ni borrar nada."""
+        """Reemplaza uno o varios hechos vigentes por uno nuevo, sin editar ni borrar nada.
+
+        Si alguno viene de un origen más fiable que quien lo pide, el cambio queda pendiente de
+        una persona y se lanza `PendingConfirmationError` (ADR-0011).
+        """
         safety.check_before_saving(
             [request.new_content, request.reason, request.source, *(request.tags or [])],
             allow_secrets=allow_secrets,
         )
+        actor = self._actor(external)
         if request.new_id is not None:
-            return self._link(request.old_ids, request.new_id, request.reason)
+            return self._link(request, request.new_id, actor)
         assert request.new_content is not None  # lo garantiza SupersedeRequest
         content = request.new_content
         now = self._now()
         # Validar antes de llamar al servicio de embeddings: una petición que va a fallar no
         # debe esperar a la red. Se vuelve a validar dentro de la transacción por si cambió.
-        for old_id in request.old_ids:
-            self._check_supersedable(self._require(old_id))
+        current = [self._require(old_id) for old_id in request.old_ids]
+        for old in current:
+            self._check_supersedable(old)
+        if _outranked(actor, current):
+            if request.valid_from is not None:
+                _check_starts_after(
+                    _truncate(request.valid_from), max(old.valid_from for old in current)
+                )
+            self._leave_pending(request, actor)
         warnings: list[str] = []
         vector = self._embed(content, "document", warnings)
         with store.transaction(self._conn):
             olds = [self._require(old_id) for old_id in request.old_ids]
             for old in olds:
                 self._check_supersedable(old)
+                if _outranked(actor, [old]):  # una persona lo confirmó mientras tanto
+                    raise ProtectedError(
+                        tr("{id} lo acaba de confirmar una persona. Vuelve a pedirlo.", id=old.id)
+                    )
             latest_start = max(old.valid_from for old in olds)
             if request.valid_from is None:
                 # Sin fecha explícita: ahora, pero siempre después de que empezaran las anteriores.
@@ -195,22 +239,28 @@ class MemoryService:
                 valid_from=valid_from,
                 supersedes_id=primary.id,
                 supersede_reason=request.reason,
+                origin=actor,
             )
             seq = store.insert_memory(self._conn, new)
             if vector is not None:
                 self._store_vector(seq, new, vector, now)
             self._close(olds, new.id, valid_from)
-            return self._superseded(new.id, olds, warnings)
+        self._note_clashes(new, vector, warnings)
+        return self._superseded(new.id, olds, warnings)
 
-    def _link(self, old_ids: list[str], new_id: str, reason: str | None) -> SupersedeResult:
+    def _link(self, request: SupersedeRequest, new_id: str, actor: Origin) -> SupersedeResult:
         """Enlaza una memoria ya guardada como versión nueva de otras, sin duplicar el hecho.
 
         Si ya era la versión nueva de otro hecho, se le suman estos: así se puede completar
         después un reemplazo («también dejó obsoleto esto otro»). Su hecho principal y su
         motivo no cambian.
+
+        Vale lo que valga el menos fiable de los dos, quien enlaza o la memoria enlazada: un
+        agente no puede cerrar un hecho de una persona con otro hecho suyo que no tiene que ver.
+        Si enlaza una persona, vale lo que ella, y la versión nueva pasa a ser suya (ADR-0011).
         """
         with store.transaction(self._conn):
-            olds = [self._require(old_id) for old_id in old_ids]
+            olds = [self._require(old_id) for old_id in request.old_ids]
             new = self._require(new_id)
             for old in olds:
                 self._check_supersedable(old)
@@ -222,18 +272,122 @@ class MemoryService:
                     tr("Ese enlace crearía un ciclo en la cadena de versiones.")
                 )
             _check_starts_after(new.valid_from, max(old.valid_from for old in olds))
-            if new.supersedes_id is None:
-                store.set_supersedes(
-                    self._conn, self.workspace_id, new.id, supersedes_id=olds[0].id, reason=reason
+            by_person = actor is Origin.PERSON
+            effective = actor if by_person else min(actor, new.origin, key=lambda o: o.rank)
+            if not _outranked(effective, olds):
+                if new.supersedes_id is None:
+                    store.set_supersedes(
+                        self._conn,
+                        self.workspace_id,
+                        new.id,
+                        supersedes_id=olds[0].id,
+                        reason=request.reason,
+                    )
+                if by_person:
+                    store.set_origin(self._conn, self.workspace_id, new.id, Origin.PERSON)
+                self._close(olds, new.id, new.valid_from)
+                return self._superseded(new.id, olds)
+        self._leave_pending(request, effective)
+
+    def _actor(self, external: bool) -> Origin:
+        """Quién escribe. Se puede declarar un origen menos fiable que el propio, nunca más."""
+        return (
+            min(self._origin, Origin.EXTERNAL, key=lambda o: o.rank) if external else self._origin
+        )
+
+    def _leave_pending(self, request: SupersedeRequest, actor: Origin) -> NoReturn:
+        """Apunta el cambio para que decida una persona. Los hechos siguen vigentes."""
+        with store.transaction(self._conn):
+            pending = store.list_pending(self._conn, self.workspace_id)
+            wanted = (sorted(request.old_ids), request.new_content, request.new_id)
+            same = [c for c in pending if (sorted(c.old_ids), c.content, c.new_id) == wanted]
+            if not same and len(pending) >= MAX_PENDING:
+                raise ProtectedError(
+                    tr("Hay demasiados cambios pendientes. Una persona tiene que revisarlos.")
                 )
-            self._close(olds, new.id, new.valid_from)
-            return self._superseded(new.id, olds)
+            now = self._now()
+            change = PendingChange(
+                id=same[0].id if same else new_ulid(store.to_ms(now)),
+                old_ids=request.old_ids,
+                content=request.new_content,
+                new_id=request.new_id,
+                reason=request.reason,
+                tags=request.tags,
+                source=request.source,
+                confidence=request.confidence,
+                valid_from=request.valid_from,
+                origin=actor,
+                created_at=now,
+            )
+            if not same:
+                store.insert_pending(self._conn, self.workspace_id, change)
+            if request.new_id is not None:  # ya está guardada: que no salga sin la más fiable
+                store.add_contradictions(self._conn, request.new_id, request.old_ids)
+        raise PendingConfirmationError(
+            tr(
+                "Cambio pendiente {id}: lo tiene que confirmar una persona con `vigente accept`. "
+                "El hecho anterior sigue vigente. No lo reintentes; díselo al usuario.",
+                id=change.id,
+            ),
+            current_id=request.old_id,
+        )
+
+    # --- lo que solo hace una persona (ADR-0011)
+
+    def confirm(self, memory_id: str) -> Memory:
+        """Una persona da por bueno un hecho que guardó un agente: queda protegido."""
+        self._require_person()
+        with store.transaction(self._conn):
+            memory = self._require(memory_id)
+            store.set_origin(self._conn, self.workspace_id, memory.id, Origin.PERSON)
+            confirmed = self._require(memory.id)
+        self._note_clashes(confirmed, self._embed(confirmed.content, "document", []), [])
+        return confirmed
+
+    def pending(self) -> list[PendingChange]:
+        return store.list_pending(self._conn, self.workspace_id)
+
+    def accept(self, pending_id: str) -> SupersedeResult:
+        """Aplica un cambio pendiente como si lo hiciera la persona que lo acepta."""
+        self._require_person()
+        change = self._require_pending(pending_id)
+        fields: dict[str, object] = {"old_id": change.old_ids[0]}
+        fields["also_old_ids"] = change.old_ids[1:]
+        fields |= {"new_content": change.content, "new_id": change.new_id, "reason": change.reason}
+        if change.content is not None:
+            fields |= {"tags": change.tags, "source": change.source}
+            fields |= {"confidence": change.confidence, "valid_from": change.valid_from}
+        result = self.supersede(SupersedeRequest.model_validate(fields))
+        self._drop_pending(change.id)
+        return result
+
+    def reject(self, pending_id: str) -> None:
+        """Descarta un cambio pendiente y borra su texto."""
+        self._require_person()
+        self._drop_pending(self._require_pending(pending_id).id)
+
+    def _require_person(self) -> None:
+        if self._origin is not Origin.PERSON:
+            raise ProtectedError(tr("Solo lo puede hacer una persona, desde la CLI."))
+
+    def _require_pending(self, pending_id: str) -> PendingChange:
+        valid_id = _memory_id.validate_python(pending_id)
+        change = store.get_pending(self._conn, self.workspace_id, valid_id)
+        if change is None:
+            raise NotFoundError(tr("No existe el cambio pendiente {id}.", id=valid_id))
+        return change
+
+    def _drop_pending(self, pending_id: str) -> None:
+        with store.transaction(self._conn):
+            store.delete_pending(self._conn, self.workspace_id, pending_id)
+        store.checkpoint(self._conn)
 
     def _close(self, olds: list[Memory], new_id: str, valid_to: datetime) -> None:
         for old in olds:
             store.mark_superseded(
                 self._conn, self.workspace_id, old.id, valid_to=valid_to, superseded_by_id=new_id
             )
+            store.inherit_contradictions(self._conn, old.id, new_id)
 
     def _superseded(
         self, new_id: str, olds: list[Memory], warnings: list[str] | None = None
@@ -249,7 +403,17 @@ class MemoryService:
         """Borra para siempre el hecho y todas sus versiones, también las de los hechos que una
         versión unió (ADR-0008). Avisa si otra conexión impide vaciar el registro de cambios."""
         with store.transaction(self._conn):
-            ids = [memory.id for memory in self._lineage(self._require(memory_id))]
+            versions = self._lineage(self._require(memory_id))
+            if _outranked(self._origin, versions):
+                # Si no, bastaría borrar el hecho verdadero y guardar el falso (ADR-0011).
+                raise ProtectedError(
+                    tr(
+                        "Lo guardó o confirmó una persona: solo una persona puede olvidarlo, con "
+                        "`vigente forget {id}`.",
+                        id=memory_id,
+                    )
+                )
+            ids = [memory.id for memory in versions]
             store.delete_memories(self._conn, self.workspace_id, ids)
         warnings = []
         if not store.checkpoint(self._conn):
@@ -322,7 +486,52 @@ class MemoryService:
 
     def recall(self, query: RecallQuery) -> RecallResult:
         """Busca según el modo configurado y avisa de los resultados marcados (ADR-0007)."""
-        return _warn_about_flags(self._search(query))
+        return _warn_about_flags(self._with_stronger_facts(query, self._search(query)))
+
+    def _with_stronger_facts(self, query: RecallQuery, result: RecallResult) -> RecallResult:
+        """Ninguna memoria sale sin el hecho más fiable al que contradice, que va delante, y se
+        avisa de los hechos con un cambio pendiente (ADR-0011). Nunca se cita el texto pendiente:
+        lo escribió quien pide el cambio."""
+        if not result.results:
+            return result
+        at_ms = store.to_ms(query.as_of if query.as_of is not None else self._now())
+        ids = [hit.memory.id for hit in result.results]
+        clashes = store.contradictions(self._conn, self.workspace_id, ids, at_ms=at_ms)
+        by_id = {hit.memory.id: hit for hit in result.results}
+        hits: list[Hit] = []
+        warnings = list(result.warnings)
+        for hit in result.results:
+            stronger = [
+                fact
+                for fact in clashes.get(hit.memory.id, [])
+                if fact.origin.rank > hit.memory.origin.rank
+            ]
+            for fact in stronger:
+                missing = Hit(memory=fact, score=0.0, matched_by=["trust"])
+                hits.append(by_id.get(fact.id, missing))
+            if stronger:
+                warnings.append(
+                    tr(
+                        "{id} puede contradecir a {facts}, más fiable: si se contradicen, vale "
+                        "lo segundo. Díselo al usuario.",
+                        id=hit.memory.id,
+                        facts=", ".join(fact.id for fact in stronger),
+                    )
+                )
+            hits.append(hit)
+        unique = list({hit.memory.id: hit for hit in hits}.values())
+        waiting = store.ids_with_pending(
+            self._conn, self.workspace_id, [hit.memory.id for hit in unique]
+        )
+        if waiting:
+            warnings.append(
+                tr(
+                    "Cambios pendientes de que los confirme una persona: {ids}. Mientras tanto, "
+                    "sigue valiendo lo que aparece aquí. Se revisan con `vigente pending`.",
+                    ids=", ".join(waiting),
+                )
+            )
+        return result.model_copy(update={"results": unique, "warnings": warnings})
 
     def _search(self, query: RecallQuery) -> RecallResult:
         """Sin embeddings, o si fallan, cae a la búsqueda de texto y avisa."""
@@ -495,6 +704,109 @@ class MemoryService:
         )
         store.insert_vector(self._conn, space, seq, memory, vector)
 
+    def _probe(
+        self, memory: Memory, document_vector: list[float], warnings: list[str]
+    ) -> list[float] | None:
+        """El vector con el que se compara una memoria con los hechos guardados."""
+        assert self._embedder is not None
+        purpose = self._embedder.profile.candidate_purpose
+        if purpose == "document":
+            return document_vector
+        return self._embed(memory.content, purpose, warnings)
+
+    def _note_clashes(
+        self, memory: Memory, vector: list[float] | None, warnings: list[str]
+    ) -> None:
+        """Apunta con qué hechos de otro rango puede chocar una memoria (ADR-0011).
+
+        Con los más fiables, si los hay: `recall` no la devolverá sin ellos. Y al revés: si la
+        nueva es la más fiable, las que ya estaban no saldrán sin ella. También los episodios: una
+        mentira contada como algo que pasó sigue siendo una mentira.
+        """
+        ranked = [origin for origin in Origin if origin.rank != memory.origin.rank]
+        clashes: list[tuple[str, str]] = []  # (menos fiable, más fiable)
+        for fact in self._similar_from(memory, vector, ranked, warnings):
+            if fact.content.casefold() == memory.content.casefold():
+                continue  # lo mismo dicho otra vez no es una contradicción
+            if fact.origin.rank > memory.origin.rank:
+                clashes.append((memory.id, fact.id))
+            elif memory.kind is Kind.FACT:
+                clashes.append((fact.id, memory.id))
+        if clashes:
+            with store.transaction(self._conn):
+                for weak, strong in clashes:
+                    store.add_contradictions(self._conn, weak, [strong])
+
+    def _similar_from(
+        self,
+        memory: Memory,
+        vector: list[float] | None,
+        origins: list[Origin],
+        warnings: list[str],
+    ) -> list[Memory]:
+        at_ms = store.to_ms(self._now())
+        by_text = True
+        found: list[Memory] = []
+        if self._embedder is not None and vector is not None:
+            probe = self._probe(memory, vector, warnings)
+            space = (
+                None
+                if probe is None
+                else store.find_embedding_space(self._conn, self._embedder.model, len(probe))
+            )
+            if probe is not None and space is not None:
+                threshold = self._embedder.profile.candidate_threshold
+                stronger = [origin for origin in origins if origin.rank > memory.origin.rank]
+                if stronger:  # exacta y solo entre los más fiables: no se puede inundar
+                    near = store.similar_facts(
+                        self._conn,
+                        space,
+                        self.workspace_id,
+                        probe,
+                        origins=stronger,
+                        at_ms=at_ms,
+                        limit=CLASH_LIMIT,
+                    )
+                    found += [fact for fact, distance in near if 1.0 - distance >= threshold]
+                weaker = [origin for origin in origins if origin.rank < memory.origin.rank]
+                if memory.origin is Origin.AGENT:  # solo lo de fuera, que suele ser poco
+                    near = store.similar_facts(
+                        self._conn,
+                        space,
+                        self.workspace_id,
+                        probe,
+                        origins=weaker,
+                        at_ms=at_ms,
+                        limit=WEAKER_LIMIT,
+                    )
+                    found += [fact for fact, distance in near if 1.0 - distance >= threshold]
+                elif weaker:  # lo de los agentes es casi todo: con preselección
+                    hits = retrieval.search_vector(
+                        self._conn,
+                        space,
+                        self.workspace_id,
+                        probe,
+                        k=WEAKER_LIMIT,
+                        at_ms=at_ms,
+                        min_similarity=threshold,
+                    )
+                    found += [hit.memory for hit in hits if hit.memory.origin in weaker]
+                by_text = store.has_memories_without_vector(self._conn, self.workspace_id, space)
+        if by_text:
+            for origin in origins:
+                hits = retrieval.search_fts(
+                    self._conn,
+                    self.workspace_id,
+                    memory.content,
+                    k=CANDIDATE_LIMIT,
+                    at_ms=at_ms,
+                    kind=Kind.FACT,
+                    exclude_id=memory.id,
+                    origins=[origin],
+                )
+                found += [hit.memory for hit in hits]
+        return [fact for fact in {f.id: f for f in found}.values() if fact.id != memory.id]
+
     def _possible_supersedes(
         self, memory: Memory, document_vector: list[float] | None, warnings: list[str]
     ) -> list[Hit]:
@@ -506,9 +818,7 @@ class MemoryService:
         at_ms = store.to_ms(self._now())
         if self._embedder is not None and document_vector is not None:
             profile = self._embedder.profile
-            probe: list[float] | None = document_vector
-            if profile.candidate_purpose != "document":
-                probe = self._embed(memory.content, profile.candidate_purpose, warnings)
+            probe = self._probe(memory, document_vector, warnings)
             if probe is not None:
                 space = store.find_embedding_space(self._conn, self._embedder.model, len(probe))
                 if space is None:
@@ -596,6 +906,11 @@ def _without_vector_warning(model: str) -> str:
 
 def _results(n: int) -> str:
     return tr("1 resultado") if n == 1 else tr("{n} resultados", n=n)
+
+
+def _outranked(actor: Origin, memories: list[Memory]) -> bool:
+    """¿Alguna memoria viene de un origen más fiable que quien quiere cambiarla?"""
+    return any(memory.origin.rank > actor.rank for memory in memories)
 
 
 def _check_starts_after(valid_from: datetime, latest_start: datetime) -> None:

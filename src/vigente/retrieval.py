@@ -7,7 +7,7 @@ import sqlite3
 from collections.abc import Sequence
 
 from vigente import store
-from vigente.models import Hit, Kind
+from vigente.models import Hit, Kind, Origin
 
 MAX_QUERY_TOKENS = 32
 RRF_K = 60  # constante habitual de Reciprocal Rank Fusion
@@ -51,6 +51,7 @@ def search_fts(
     at_ms: int | None,
     kind: Kind | None = None,
     exclude_id: str | None = None,
+    origins: Sequence[Origin] | None = None,
 ) -> list[Hit]:
     expression = fts_match_expression(text)
     if expression is None:
@@ -63,6 +64,7 @@ def search_fts(
         at_ms=at_ms,
         kind=kind,
         exclude_id=exclude_id,
+        origins=origins,
     )
     return [Hit(memory=memory, score=-rank, matched_by=["fts"]) for memory, rank in rows]
 

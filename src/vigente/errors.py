@@ -39,6 +39,18 @@ class AlreadySupersededError(VigenteError):
     code = "already_superseded"
 
 
+class PendingConfirmationError(VigenteError):
+    """El cambio quedó pendiente de que lo confirme una persona (ADR-0011)."""
+
+    code = "pending_confirmation"
+
+
+class ProtectedError(VigenteError):
+    """Lo guardó o confirmó una persona, y solo una persona puede hacerlo (ADR-0011)."""
+
+    code = "protected"
+
+
 class InvalidValidityError(VigenteError):
     code = "invalid_validity"
 
