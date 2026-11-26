@@ -1,4 +1,4 @@
-# Lastword
+# [lw) Lastword
 
 [![CI](https://github.com/laulys/lastword/actions/workflows/ci.yml/badge.svg)](https://github.com/laulys/lastword/actions/workflows/ci.yml)
 [![Licencia: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -6,11 +6,30 @@
 
 **Memoria para agentes de IA que sabe qué sigue siendo verdad.** · [Read in English](README.md)
 
-Cuando un hecho cambia, la mayoría de las memorias para agentes lo sobrescriben, o guardan las dos versiones y confían en que la búsqueda acierte. Lastword no hace ninguna de las dos cosas. El hecho anterior queda **reemplazado**: se cierra con una fecha y se enlaza con su sustituto.
+El código tiene control de versiones; lo que recuerda un agente, normalmente no. Cuando un hecho cambia, la mayoría de las memorias para agentes lo sobrescriben, o guardan las dos versiones y confían en que la búsqueda acierte. Lastword no hace ninguna de las dos cosas. El hecho anterior queda **reemplazado**: se cierra con una fecha y se enlaza con su sustituto, como una línea en un diff.
 
 - La búsqueda devuelve solo lo que es verdad **ahora**.
 - `as_of` devuelve lo que era verdad **en cualquier fecha pasada**.
 - `history` muestra cómo cambió un hecho.
+
+```diff
+@@ 2026-03-01  lo guarda una persona @@
++ Cuenta del proveedor: acaba en 2210
+
+@@ 2026-08-01  supersede @@
+- Cuenta del proveedor: acaba en 2210
++ Cuenta del proveedor: acaba en 4471
+
+@@ 2026-10-01  de un correo: espera @@
+! Cuenta del proveedor: acaba en 9902
+```
+
+```console
+# a 1 de mayo: 2210
+$ lastword search "cuenta del proveedor" --as-of 2026-05-01
+# hoy: 4471, y 9902 espera a una persona
+$ lastword search "cuenta del proveedor"
+```
 
 Una memoria que comparten varios agentes, y que dura entre sesiones, también es una superficie de ataque: OWASP pone el *envenenamiento de memoria y contexto* entre los principales riesgos de las aplicaciones con agentes ([ASI06](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/)). Por eso Lastword también **vigila lo que entra**:
 
@@ -28,7 +47,12 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 
 ## Resultados
 
-![Qué es el primer resultado de la búsqueda según el sistema de memoria](eval/results/e1_obsoletos.svg)
+```diff
+@@ primer resultado, 129 preguntas (E1) @@
+- memoria ingenua: 48% bien, 51% obsoleto
+  + recencia:      49% bien, 51% otro dato
++ lastword:        95% bien,  0% obsoleto
+```
 
 | | Memoria ingenua | Lastword |
 |---|---:|---:|
@@ -52,6 +76,13 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 **Qué pasó aquí.** Una persona guarda «el proveedor cobra en la cuenta acabada en 4471». Un agente que leyó un correo falso lo reemplaza por «…acabada en 9902». En la versión 1.3.1, con 12 casos así, se aceptaron las 12 mentiras, ninguna con aviso, y `recall` devolvía solo la mentira. `remember` incluso proponía al agente cerrar el hecho verdadero. La verdad se recuperaba siempre con `history`, pero nadie avisaba de que había que mirarlo.
 
 **La solución.** Cada memoria guarda su origen: una persona, un agente o algo que un agente trajo de fuera. Lo fija la interfaz, no quien escribe: por MCP nadie es nunca una persona. Un origen menos fiable no puede cerrar ni borrar un hecho más fiable. El cambio espera, el hecho verdadero sigue vigente y decide una persona (`lastword pending`, `accept`, `reject`). Medido con la regla fijada [antes de escribir el código](eval/README.md), con 12 pares inventados y 70 de un benchmark público ([script](eval/e5_trust.py), [resultados](eval/results/e5_trust.md)):
+
+```diff
+@@ correo falso: supersede de 4471 @@
+  Cuenta del proveedor: acaba en 4471
+! Cuenta del proveedor: acaba en 9902
+@@ en espera: 4471 lo guardó una persona @@
+```
 
 | Ataque a un hecho que guardó una persona | Hechos cerrados o borrados | La mentira sale sin la verdad (k=5) |
 |---|---:|---:|

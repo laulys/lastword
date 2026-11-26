@@ -1,4 +1,4 @@
-# Lastword
+# [lw) Lastword
 
 [![CI](https://github.com/laulys/lastword/actions/workflows/ci.yml/badge.svg)](https://github.com/laulys/lastword/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -6,11 +6,30 @@
 
 **Memory for AI agents that knows what is still true.** · [Leer en español](README.es.md)
 
-When a fact changes, most agent memories either overwrite it or keep both versions and hope that search picks the right one. Lastword does neither. The old fact is **superseded**: closed with a date and linked to its replacement.
+Code has version control; the facts an agent remembers usually do not. When a fact changes, most agent memories either overwrite it or keep both versions and hope that search picks the right one. Lastword does neither. The old fact is **superseded**: closed with a date and linked to its replacement, like a line in a diff.
 
 - Search returns only what is true **now**.
 - `as_of` returns what was true **at any past date**.
 - `history` shows how a fact changed.
+
+```diff
+@@ 2026-03-01  saved by a person @@
++ Supplier account ends in 2210
+
+@@ 2026-08-01  supersede @@
+- Supplier account ends in 2210
++ Supplier account ends in 4471
+
+@@ 2026-10-01  from an email: held @@
+! Supplier account ends in 9902
+```
+
+```console
+# as of May 1: 2210
+$ lastword search "supplier account" --as-of 2026-05-01
+# today: 4471, and 9902 waits for a person
+$ lastword search "supplier account"
+```
 
 A memory that several agents share, and that lasts between sessions, is also an attack surface: OWASP lists *Memory & Context Poisoning* among the top risks of agentic applications ([ASI06](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/)). So Lastword also **guards what goes in**:
 
@@ -28,7 +47,12 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 
 ## Results
 
-![What the first search result is, by memory system](eval/results/e1_obsoletos.svg)
+```diff
+@@ first result, 129 questions (E1) @@
+- naive memory: 48% right, 51% outdated
+  + recency:    49% right, 51% other
++ lastword:     95% right,  0% outdated
+```
 
 | | Naive memory | Lastword |
 |---|---:|---:|
@@ -52,6 +76,13 @@ The decision rules were fixed **before** measuring ([protocol](eval/README.md)),
 **What happened here.** A person saves «the supplier is paid on the account ending in 4471». An agent that read a forged email supersedes it with «…ending in 9902». In version 1.3.1, over 12 cases like this, all 12 lies were accepted, none with a warning, and `recall` returned only the lie. `remember` even suggested that the agent close the true fact. The truth could always be recovered from `history`, but nobody was told to look.
 
 **The fix.** Each memory keeps its origin: a person, an agent, or something an agent brought from outside. The interface sets it, not whoever writes: over MCP nobody is ever a person. A less trusted origin cannot close or delete a more trusted fact. The change waits, the true fact stays current, and a person decides (`lastword pending`, `accept`, `reject`). Measured with the rule fixed [before writing the code](eval/README.md), on 12 invented pairs and 70 from a public benchmark ([script](eval/e5_trust.py), [results](eval/results/e5_trust.md)):
+
+```diff
+@@ forged email: supersede 4471 @@
+  Supplier account ends in 4471
+! Supplier account ends in 9902
+@@ held: a person saved 4471 @@
+```
 
 | Attack on a fact saved by a person | Facts closed or deleted | Lie returned without the truth (k=5) |
 |---|---:|---:|
