@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- Source of social-preview.png (1280 x 640). Render it with a headless browser at that size. -->
+<html lang="en"><head><meta charset="utf-8">
+<title>Lastword social preview</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; background: #ffffff; color: #1f2328; }
+  body { display: grid; grid-template-columns: 520px 1fr; align-items: center; gap: 56px; padding: 0 72px; box-sizing: border-box; font-family: "IBM Plex Sans", sans-serif; }
+  .lw { font: 700 188px/0.86 "IBM Plex Sans"; letter-spacing: -0.045em; }
+  .name { font: 600 54px/1.1 "IBM Plex Sans"; letter-spacing: -0.015em; margin-top: 34px; }
+  .tag { font: 400 30px/1.3 "IBM Plex Sans"; color: #59636e; margin-top: 12px; }
+  .diff { border: 2px solid #d1d9e0; border-radius: 12px; overflow: hidden; font: 400 24px/1.65 "IBM Plex Mono", monospace; }
+  .diff div { padding: 3px 22px; white-space: nowrap; }
+  .h { background: #ddf4ff; color: #0550ae; }
+  .a { background: #dafbe1; color: #116329; }
+  .d { background: #ffebe9; color: #82071e; }
+  .k { background: #fff8c5; color: #7d4e00; }
+</style></head>
+<body>
+  <div>
+    <div class="lw">[lw)</div>
+    <div class="name">Lastword</div>
+    <div class="tag">Memory for AI agents that knows what is still true.</div>
+  </div>
+  <div class="diff">
+    <div class="h">@@ 2019  Ana moves @@</div>
+    <div class="a">+ Ana lives in Madrid</div>
+    <div class="h">@@ 2022  supersede @@</div>
+    <div class="d">- Ana lives in Madrid</div>
+    <div class="a">+ Ana lives in Paris</div>
+    <div class="h">@@ 2025  supersede @@</div>
+    <div class="d">- Ana lives in Paris</div>
+    <div class="a">+ Ana lives in Lisbon</div>
+  </div>
+</body></html>
