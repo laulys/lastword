@@ -158,11 +158,11 @@ Every version, in detail: [CHANGELOG.md](CHANGELOG.md).
 git clone https://github.com/laulys/lastword && cd lastword
 uv sync
 ollama pull embeddinggemma        # optional: without it, Lastword searches by text only
-uv run lastword add "El proyecto usa PostgreSQL 15" --valid-from 2026-03-01
-uv run lastword add "Migramos a SQLite para el MVP"   # proposes replacing the previous fact
+uv run lastword add "The project uses PostgreSQL 15" --valid-from 2026-03-01
+uv run lastword add "We moved to SQLite for our MVP"   # proposes replacing the previous fact
 uv run lastword supersede <old-id> --by <new-id>
-uv run lastword search "¿qué base de datos usamos?"
-uv run lastword search "¿qué base de datos usamos?" --as-of 2026-06-01
+uv run lastword search "which database do we use?"
+uv run lastword search "which database do we use?" --as-of 2026-06-01
 ```
 
 All CLI commands (`lastword --help` for their options):
