@@ -63,9 +63,14 @@ Funciona en local como **servidor MCP**, así que Claude Code, Codex, Cursor o c
 - **Reordenar por lo más reciente no basta.** Elimina los obsoletos, pero entonces el primer resultado es otro dato en la mitad de las preguntas (51%).
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 preguntas de un benchmark público: sin reemplazos, la versión vieja de un dato actualizado sale antes que la nueva en el **54–56%** de los casos, con cualquier modo de búsqueda.
 - **[Escala](eval/results/scale.md):** con 200.000 hechos, una búsqueda tarda 25 ms y guardar un hecho 26 ms (7 ms cada una con 50.000). Guardar cuesta lo mismo que buscar porque cada hecho nuevo se compara con los vigentes para proponer reemplazos. La búsqueda compara primero vectores comprimidos a 1 bit y reordena los mejores candidatos con los exactos, con los mismos resultados que una búsqueda exacta en E1 y E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Hay que sumar unos 13 ms del modelo de embeddings.
+<details>
+<summary>Más resultados: un agente real, códigos exactos y los filtros de seguridad</summary>
+
 - **[Un agente real](eval/results/agent_demo.md)** (Claude Code, cuatro sesiones independientes que solo comparten Lastword) sigue el protocolo por su cuenta: antes de guardar un cambio busca el hecho viejo, o enlaza el reemplazo que le propone `remember`; no duplica hechos y responde con lo vigente.
 - **[Códigos exactos](eval/results/e4_exact.md):** la búsqueda por vectores ya devuelve primero la memoria correcta en 36 de 36 preguntas que dependen de un código (el error E-4031 frente al E-4013, el pedido 7781 frente al 7718); la de texto sola acierta 34. Por eso no se añadió ningún modo especial.
 - **[Seguridad](eval/results/e3_security.md):** los filtros detectan 40 de 40 secretos sin ningún falso aviso en 40 frases parecidas (números de pedido, hashes, «la clave está en 1Password»), y marcan 40 de 40 órdenes incrustadas frente a 1 de 40 memorias legítimas. Los casos y las reglas los escribió la misma persona: es un techo.
+
+</details>
 
 Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.md)), y E1 y E2 dan resultados idénticos al repetirlos.
 
@@ -93,14 +98,21 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 
 **Revisada antes de publicarla.** E5 cumplía, y aun así una revisión de seguridad encontró dos formas de dejar la protección sin efecto y varias menores: por ejemplo, cambiar el texto mientras la persona decide. Están corregidas, con un test por ataque, y contadas en el [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md#vías-que-encontró-una-revisión-antes-de-publicar). Medir bien cinco vías no demuestra que no haya una sexta.
 
-**Lo que no resuelve:**
+<details>
+<summary>Lo que no resuelve</summary>
+
 
 - **Un agente puede seguir cambiando lo que guardó otro agente.** Mismo origen, sin protección. `lastword confirm` protege un hecho que una persona da por bueno.
 - **Las mentiras guardadas junto a la verdad solo se mitigan.** Salen las dos, la fiable primero. La tabla es con embeddings: pidiendo un solo resultado, 3 de 23 mentiras salieron solas, y sin embeddings, 1 de 66 con cinco resultados. El aviso nombra a las dos en 58 de 69 casos reales (84%): por debajo del 90% fijado antes, si tiene que nombrar a las dos. Leída al pie de la letra, la regla se cumple con 63 de 69.
 - **Cuesta avisos de más.** Las 10 frases legítimas del mismo tema que un hecho de una persona llevaron uno. Sin embeddings, también 2 de 8 sin relación.
 - **Un agente con acceso a la terminal puede usar la CLI,** y ahí cuenta como una persona.
 
-**Cómo lo tratan otros**, leído en su código el 25 de noviembre de 2026, sin ejecutarlo:
+</details>
+
+<details>
+<summary>Cómo lo tratan otros</summary>
+
+Leído en su código el 25 de noviembre de 2026, sin ejecutarlo:
 
 | Proyecto | Fechas de validez | ¿La confianza decide qué reemplaza a qué? |
 |---|---|---|
@@ -108,9 +120,14 @@ Las reglas de decisión se fijaron **antes** de medir ([protocolo](eval/README.m
 | [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard/blob/2628cfdb91731ab80caf7fcb0adbe293645ce6e3/src/agent_memory_guard/policies/access.py#L58) | No se encontraron | En parte: reglas de quién escribe qué; cuarentena y vuelta atrás |
 | [ShieldCortex](https://github.com/Drakon-Systems-Ltd/ShieldCortex/blob/128a0734883f33309c9ebfe171c9511fcfb9f6b8/src/threat-graph/conflict.ts#L36) | En parte, en su grafo | En parte: la confianza señala conflictos en cuatro tipos de relación y decide una persona |
 
+</details>
+
 El diseño, lo que se descartó y por qué, en el [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md).
 
 ## Novedades desde la 1.0
+
+<details>
+<summary>Cada cambio de la 1.0 a la 2.0, en una línea</summary>
 
 - **Nombre nuevo (2.0).** El proyecto se llamaba Vigente; lo configurado con ese nombre sigue valiendo ([cómo actualizar](#desarrollo)).
 - **Quién puede cambiar un hecho (1.4).** Un origen menos fiable no puede reemplazar un hecho más fiable: el cambio espera a una persona ([por qué](#investigación-de-seguridad-puede-una-mentira-reemplazar-a-un-hecho)).
@@ -121,6 +138,8 @@ El diseño, lo que se descartó y por qué, en el [ADR-0011](docs/decisions/0011
 - **Búsqueda más rápida (1.2).** Búsqueda por vectores en dos pasos: unas 9 veces más rápida que la exacta con 50.000 memorias, con los mismos resultados.
 - **En inglés o en español (1.2).** La CLI y `lastword-mcp` siguen el idioma del sistema o `LASTWORD_LANG`.
 - **Auditada (1.3).** Una revisión completa del código corrigió, entre otros, un fallo con las fechas y dos problemas de privacidad ([Seguridad y privacidad](#seguridad-y-privacidad)).
+
+</details>
 
 Cada versión, en detalle: [CHANGELOG.md](CHANGELOG.md) (en inglés).
 
@@ -271,6 +290,9 @@ Si el servicio de embeddings no responde, Lastword sigue funcionando con búsque
 
 ## Decisiones de diseño
 
+<details>
+<summary>Las 11 decisiones, cada una con las alternativas que se consideraron</summary>
+
 Cada decisión tiene un ADR con las alternativas que se consideraron:
 
 1. [Un solo archivo SQLite con FTS5 y sqlite-vec, sin ORM](docs/decisions/0001-sqlite-fts5-sqlite-vec.md)
@@ -284,6 +306,8 @@ Cada decisión tiene un ADR con las alternativas que se consideraron:
 9. [Compartir entre ordenadores: HTTP con token](docs/decisions/0009-compartir-por-http.md)
 10. [Búsqueda en dos pasos: vectores binarios y reordenación exacta](docs/decisions/0010-busqueda-en-dos-pasos.md)
 11. [Quién puede cambiar lo que es verdad](docs/decisions/0011-quien-puede-cambiar-un-hecho.md)
+
+</details>
 
 El diseño completo está en [docs/architecture.md](docs/architecture.md).
 

@@ -63,9 +63,14 @@ It runs locally as an **MCP server**, so Claude Code, Codex, Cursor or any MCP c
 - **Re-ranking by recency is not enough.** It removes outdated results, but then the first result is a different fact in half of the questions (51%).
 - **[LongMemEval](eval/results/e2_longmemeval.md)**, 470 questions from a public benchmark: without supersession, the old version of an updated fact ranks above the new one in **54–56%** of cases, with any search mode.
 - **[Scale](eval/results/scale.md):** with 200,000 facts, a search takes 25 ms and saving a fact 26 ms (7 ms each with 50,000). Saving costs as much as searching because every new fact is compared with the current ones to propose replacements. Search compares compressed 1-bit vectors first and re-ranks the best candidates with the exact ones, with the same results as an exact search in E1 and E2 ([ADR-0010](docs/decisions/0010-busqueda-en-dos-pasos.md)). Add about 13 ms for the embedding model.
+<details>
+<summary>More results: a real agent, exact codes and the security filters</summary>
+
 - **[A real agent](eval/results/agent_demo.md)** (Claude Code, four independent sessions sharing only Lastword) follows the protocol on its own: before saving a change it searches for the old fact, or it links the replacement that `remember` proposes; it does not duplicate facts, and it answers with what is current.
 - **[Exact codes](eval/results/e4_exact.md):** vector search already returns the right memory first for 36 of 36 questions that hinge on a code (error E-4031 vs E-4013, order 7781 vs 7718); text search alone gets 34. So no special mode was added.
 - **[Security](eval/results/e3_security.md):** the filters catch 40 of 40 secrets with no false alarms on 40 lookalikes (order numbers, hashes, «the key is in 1Password»), and flag 40 of 40 injected orders while marking 1 of 40 legitimate memories. The same author wrote the cases and the rules, so read it as a ceiling.
+
+</details>
 
 The decision rules were fixed **before** measuring ([protocol](eval/README.md)), and E1 and E2 give identical results when re-run.
 
@@ -93,14 +98,21 @@ The decision rules were fixed **before** measuring ([protocol](eval/README.md)),
 
 **Reviewed before release.** E5 passed, and still a security review found two ways to make the protection useless and several smaller ones: for example, changing the text while the person decides. They are fixed, with one test per attack, and told in [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md#vías-que-encontró-una-revisión-antes-de-publicar) (in Spanish). Measuring five routes well does not prove there is no sixth.
 
-**What it does not solve:**
+<details>
+<summary>What it does not solve</summary>
+
 
 - **An agent can still change what another agent saved.** Same origin, no protection. `lastword confirm` protects a fact a person vouches for.
 - **Lies saved next to the truth are only mitigated.** Both are returned, the trusted one first. The table is with embeddings: asking for a single result, 3 of 23 lies came alone, and without embeddings, 1 of 66 with five results. The warning names both in 58 of 69 real cases (84%): below the 90% set beforehand, if it must name both. Read literally, the rule is met with 63 of 69.
 - **It costs extra warnings.** All 10 legitimate statements on the same topic as a person's fact got one. Without embeddings, so did 2 of 8 unrelated ones.
 - **An agent with access to the terminal can use the CLI,** and there it counts as a person.
 
-**How others handle it**, read in their code on 25 November 2026, without running it:
+</details>
+
+<details>
+<summary>How others handle it</summary>
+
+Read in their code on 25 November 2026, without running it:
 
 | Project | Validity dates | Does trust decide what replaces what? |
 |---|---|---|
@@ -108,9 +120,14 @@ The decision rules were fixed **before** measuring ([protocol](eval/README.md)),
 | [OWASP Agent Memory Guard](https://github.com/OWASP/www-project-agent-memory-guard/blob/2628cfdb91731ab80caf7fcb0adbe293645ce6e3/src/agent_memory_guard/policies/access.py#L58) | Not found | Partly: rules on who may write what; quarantine and rollback |
 | [ShieldCortex](https://github.com/Drakon-Systems-Ltd/ShieldCortex/blob/128a0734883f33309c9ebfe171c9511fcfb9f6b8/src/threat-graph/conflict.ts#L36) | Partly, in its graph | Partly: trust flags conflicts in four relation types, and a person decides |
 
+</details>
+
 The design, what was discarded and why: [ADR-0011](docs/decisions/0011-quien-puede-cambiar-un-hecho.md) (in Spanish).
 
 ## What's new since 1.0
+
+<details>
+<summary>Every change from 1.0 to 2.0, one line each</summary>
 
 - **A new name (2.0).** The project was called Vigente; what was set up with that name keeps working ([how to upgrade](#development)).
 - **Who may change a fact (1.4).** A less trusted origin cannot replace a more trusted fact: the change waits for a person ([why](#security-research-can-a-lie-replace-a-fact)).
@@ -121,6 +138,8 @@ The design, what was discarded and why: [ADR-0011](docs/decisions/0011-quien-pue
 - **Faster search (1.2).** Two-stage vector search: about 9 times faster than exact search with 50,000 memories, with the same results.
 - **English or Spanish (1.2).** The CLI and `lastword-mcp` follow the system language or `LASTWORD_LANG`.
 - **Audited (1.3).** A full review of the code fixed, among others, a date bug and two privacy issues ([Security and privacy](#security-and-privacy)).
+
+</details>
 
 Every version, in detail: [CHANGELOG.md](CHANGELOG.md).
 
@@ -271,6 +290,9 @@ If the embedding service is down, Lastword keeps working with text search and sa
 
 ## Design decisions
 
+<details>
+<summary>The 11 decisions, each with the alternatives considered (in Spanish)</summary>
+
 Each decision has an ADR with the alternatives considered (in Spanish):
 
 1. [One SQLite file with FTS5 and sqlite-vec, no ORM](docs/decisions/0001-sqlite-fts5-sqlite-vec.md)
@@ -284,6 +306,8 @@ Each decision has an ADR with the alternatives considered (in Spanish):
 9. [Sharing between computers: HTTP with a token](docs/decisions/0009-compartir-por-http.md)
 10. [Two-stage search: binary vectors, then an exact re-rank](docs/decisions/0010-busqueda-en-dos-pasos.md)
 11. [Who may change what is true](docs/decisions/0011-quien-puede-cambiar-un-hecho.md)
+
+</details>
 
 The full design is in [docs/architecture.md](docs/architecture.md).
 
